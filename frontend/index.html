@@ -1,0 +1,44 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <title>AI 知識夥伴 - 祐祐</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>AI 知識夥伴 - 祐祐 ✨</h1>
+        </div>
+        <div class="chat-box" id="chat-box">
+            <div class="message ai-message">
+                <img src="yoyo-avatar.png" alt="ai-avatar" class="avatar">
+                <div class="message-content">
+                    <p>嗨！我是祐祐，你的AI知識夥伴！你可以問我問題，也可以拍照或傳檔案給我看喔！🚀</p>
+                </div>
+            </div>
+        </div>
+        <div class="chat-input-area">
+            <form id="chat-form">
+                <!-- 隱藏的檔案上傳輸入框 (通用) -->
+                <input type="file" id="file-input" accept="image/*" style="display: none;">
+                <!-- 隱藏的相機專用輸入框 -->
+                <input type="file" id="camera-input" accept="image/*" capture="environment" style="display: none;">
+                
+                <!-- 新增的兩個按鈕 -->
+                <button type="button" id="camera-btn" title="開啟相機">📷</button>
+                <button type="button" id="upload-btn" title="上傳檔案">📁</button>
+                
+                <input type="text" id="user-input" placeholder="在這裡問祐祐問題..." autocomplete="off">
+                <button type="button" id="toggle-speech-btn">🔇</button> 
+                <button type="button" id="mic-btn">🎤</button>
+                <button type="submit">↩️</button>
+            </form>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
