@@ -1,44 +1,29 @@
-// script.js (完整版)
+// script.js (Vercel 適配 + 模擬串流動畫版)
 
 document.addEventListener("DOMContentLoaded", () => {
-    // --- 變數定義 ---
+    // --- 變數定義 (不變) ---
     const chatForm = document.getElementById("chat-form");
     const userInput = document.getElementById("user-input");
     const chatBox = document.getElementById("chat-box");
     const micBtn = document.getElementById("mic-btn");
     const toggleSpeechBtn = document.getElementById("toggle-speech-btn");
-    
-    // 新增的按鈕和輸入框
     const cameraBtn = document.getElementById("camera-btn");
     const uploadBtn = document.getElementById("upload-btn");
     const fileInput = document.getElementById("file-input");
     const cameraInput = document.getElementById("camera-input");
 
-    // --- Socket.IO 連線 ---
-    const socket = io("http://127.0.0.1:5000");
+    const API_URL = "/api/chat"; 
 
-    // --- 全域變數 ---
     let conversationHistory = [];
-    let audioQueue = [];
-    let isPlaying = false;
-    let currentAiMessageElement = null;
-    let currentAiParagraphElement = null;
+    let currentAudio = null;
 
-    // --- 處理檔案/相機上傳 ---
-    cameraBtn.addEventListener('click', () => {
-        cameraInput.click();
-    });
-
-    uploadBtn.addEventListener('click', () => {
-        fileInput.click();
-    });
-
-    // 兩個輸入框共用同一個處理函式
+    // --- 檔案/相機上傳 (不變) ---
+    cameraBtn.addEventListener('click', () => cameraInput.click());
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    
     const handleFileSelection = (event) => {
         const file = event.target.files[0];
         if (!file) return;
-
-        // 我們只處理圖片檔案的預覽和發送
         if (file.type.startsWith('image/')) {
             const reader = new FileReader();
             reader.onload = (e) => {
@@ -48,28 +33,19 @@ document.addEventListener("DOMContentLoaded", () => {
             };
             reader.readAsDataURL(file);
         } else {
-            // 對於非圖片檔案，可以進行不同的處理
-            // 目前，我們簡單地顯示檔名並提示無法預覽
-            const messageText = userInput.value.trim() || `我上傳了一個檔案：${file.name}`;
-            addMessageToChatBox(messageText, "user");
-            alert(`抱歉，祐祐目前只能看懂圖片檔案喔！這個檔案 (${file.name}) 還沒辦法處理。`);
-            // 如果未來後端支援其他檔案類型，可以在這裡擴充
+            alert(`抱歉，祐祐目前只能看懂圖片檔案喔！`);
         }
-
-        // 清空 input 的值，以便下次能選擇同一個檔案
         event.target.value = '';
     };
 
     fileInput.addEventListener('change', handleFileSelection);
     cameraInput.addEventListener('change', handleFileSelection);
 
-
-    // --- 打字機效果函式 (不變) ---
+    // --- MODIFIED: 修改 typeWriter 以接受 callback ---
     function typeWriter(element, text, callback) {
         let i = 0;
-        const speed = 50;
-        element.classList.add('typing-cursor');
-
+        const speed = 50; // 打字速度 (ms)
+        
         function type() {
             if (i < text.length) {
                 element.textContent += text.charAt(i);
@@ -77,80 +53,73 @@ document.addEventListener("DOMContentLoaded", () => {
                 chatBox.scrollTop = chatBox.scrollHeight;
                 setTimeout(type, speed);
             } else {
-                element.classList.remove('typing-cursor');
-                if (callback) callback();
+                if (callback) callback(); // 完成後調用回呼函式
             }
         }
         type();
     }
 
-    // --- Socket.IO 事件監聽 (不變) ---
-    socket.on('connect', () => console.log('成功連接到伺服器！ Socket ID:', socket.id));
-    socket.on('disconnect', () => console.log('與伺服器斷開連接'));
-    socket.on('ai_chunk', (data) => {
-        removeTypingIndicator();
-        if (!currentAiMessageElement) {
-            currentAiMessageElement = createMessageElement("ai");
-            currentAiParagraphElement = currentAiMessageElement.querySelector('p');
-            chatBox.appendChild(currentAiMessageElement);
+    // --- NEW: 新增回應動畫的總指揮函式 ---
+    async function animateResponse(segments, audioContent) {
+        // 1. 創建一個空的 AI 訊息框
+        const aiMessageElement = createMessageElement("ai");
+        const p = aiMessageElement.querySelector('p');
+        chatBox.appendChild(aiMessageElement);
+        p.classList.add('typing-cursor'); // 立即顯示游標
+
+        // 2. 開始播放完整的音訊
+        playAudio(audioContent);
+
+        // 3. 使用 async/await 依序為每個片段播放打字動畫
+        for (const segment of segments) {
+            // 等待當前片段的打字機效果完成
+            await new Promise(resolve => {
+                typeWriter(p, segment.text + " ", resolve);
+            });
+            // 可以在片段之間加入一個微小的固定延遲，讓節奏更自然
+            // await new Promise(resolve => setTimeout(resolve, 100));
         }
-        const existingText = currentAiParagraphElement.textContent;
-        currentAiParagraphElement.textContent = existingText;
-        typeWriter(currentAiParagraphElement, data.text + " ", () => {});
-        if (data.audio_content) {
-            audioQueue.push(data.audio_content);
-            if (!isPlaying) {
-                playNextInQueue();
-            }
-        }
-    });
-    socket.on('stream_end', (data) => {
-        console.log('串流結束:', data.message);
-        if (currentAiParagraphElement) {
-            currentAiParagraphElement.classList.remove('typing-cursor');
-            const fullReply = currentAiParagraphElement.textContent.trim();
-            conversationHistory.push({ role: 'model', parts: [fullReply] });
-        }
-        currentAiMessageElement = null;
-        currentAiParagraphElement = null;
-        userInput.disabled = false;
-        userInput.focus();
-    });
-    socket.on('stream_error', (data) => {
-        console.error('伺服器錯誤:', data.error);
-        removeTypingIndicator();
-        addMessageToChatBox("糟糕，祐祐好像斷線了，請稍後再試一次！", "ai");
-        currentAiMessageElement = null;
-        currentAiParagraphElement = null;
-        userInput.disabled = false;
-    });
-    
+        
+        p.classList.remove('typing-cursor'); // 所有動畫完成後，移除游標
+
+        // 4. 動畫全部完成後，才將完整的回應加入歷史紀錄
+        const fullReply = p.textContent.trim();
+        conversationHistory.push({ role: 'model', parts: [fullReply] });
+    }
+
     // --- 音訊播放邏輯 (不變) ---
-    const playNextInQueue = () => {
-        if (audioQueue.length === 0) {
-            isPlaying = false;
+    const playAudio = (base64Audio) => {
+        if (!base64Audio) {
             toggleSpeechBtn.style.display = 'none';
-            toggleSpeechBtn.classList.remove('speaking');
-            toggleSpeechBtn.textContent = '🔇';
             return;
         }
-        isPlaying = true;
-        toggleSpeechBtn.style.display = 'flex';
-        toggleSpeechBtn.classList.add('speaking');
-        toggleSpeechBtn.textContent = '🔊';
-        const audioBase64 = audioQueue.shift();
-        const audioSource = `data:audio/mpeg;base64,${audioBase64}`;
-        const audio = new Audio(audioSource);
-        audio.play();
-        audio.onended = () => playNextInQueue();
-        audio.onerror = () => {
-            console.error("音訊播放錯誤");
-            playNextInQueue();
+        if (currentAudio) currentAudio.pause();
+        const audioSource = `data:audio/mpeg;base64,${base64Audio}`;
+        currentAudio = new Audio(audioSource);
+        currentAudio.onplaying = () => {
+            toggleSpeechBtn.classList.add('speaking');
+            toggleSpeechBtn.textContent = '🔊';
         };
+        currentAudio.onpause = () => {
+             toggleSpeechBtn.classList.remove('speaking');
+             toggleSpeechBtn.textContent = '🔇';
+        };
+        currentAudio.onended = () => {
+            toggleSpeechBtn.style.display = 'none';
+            currentAudio = null;
+        };
+        toggleSpeechBtn.style.display = 'flex';
+        currentAudio.play();
     };
 
-    // --- 發送訊息邏輯 (不變) ---
-    const sendMessage = (message, imageBase64 = null) => {
+    toggleSpeechBtn.addEventListener('click', () => {
+        if (!currentAudio) return;
+        if (!currentAudio.paused) currentAudio.pause();
+        else currentAudio.play();
+    });
+
+    // --- MODIFIED: 修改 sendMessage 以調用動畫函式 ---
+    const sendMessage = async (message, imageBase64 = null) => {
         if (!message && !imageBase64) return;
         
         userInput.value = "";
@@ -158,67 +127,82 @@ document.addEventListener("DOMContentLoaded", () => {
         addMessageToChatBox(message, "user", imageBase64);
 
         const messageParts = [];
-        if (message) {
-            messageParts.push(message);
-        }
+        if (message) messageParts.push(message);
         if (imageBase64) {
             const match = imageBase64.match(/^data:(image\/\w+);base64,(.*)$/);
-            if(match) {
-                messageParts.push({
-                    inline_data: { mime_type: match[1], data: match[2] }
-                });
-            }
+            if(match) messageParts.push({ inline_data: { mime_type: match[1], data: match[2] } });
         }
-
         conversationHistory.push({ role: 'user', parts: messageParts });
+
         showTypingIndicator();
-        socket.emit('chat_message', { history: conversationHistory });
+        if(currentAudio) currentAudio.pause();
+
+        try {
+            const response = await fetch(API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ history: conversationHistory }),
+            });
+
+            removeTypingIndicator();
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `伺服器錯誤: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            // 調用新的動畫函式，而不是直接 addMessageToChatBox 和 playAudio
+            await animateResponse(data.segments, data.audio_content);
+
+            // 注意：conversationHistory 的 model 部分已經在 animateResponse 中處理
+
+        } catch (error) {
+            console.error("錯誤:", error);
+            removeTypingIndicator();
+            addMessageToChatBox(`糟糕，祐祐好像斷線了 (${error.message})`, "ai");
+            conversationHistory.pop();
+        } finally {
+            userInput.disabled = false;
+            userInput.focus();
+        }
     };
 
+    // --- 提交表單邏輯 (不變) ---
     chatForm.addEventListener("submit", (e) => {
         e.preventDefault();
         const userMessage = userInput.value.trim();
-        if (userMessage) {
-            sendMessage(userMessage);
-        }
+        if (userMessage) sendMessage(userMessage);
     });
 
     // --- UI 輔助函式 (不變) ---
     function createMessageElement(sender, messageText = "", imageBase64 = null) {
         const messageElement = document.createElement("div");
         messageElement.classList.add("message", `${sender}-message`);
-
         if (sender === 'ai') {
             const avatar = document.createElement("img");
-            avatar.src = "yoyo-avatar.png";
-            avatar.alt = "ai-avatar";
-            avatar.className = "avatar";
+            avatar.src = "yoyo-avatar.png"; avatar.alt = "ai-avatar"; avatar.className = "avatar";
             messageElement.appendChild(avatar);
         }
-
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
-
-        if (messageText) {
+        if (messageText || sender === 'ai') { // AI訊息即使為空也要創建p標籤
             const p = document.createElement("p");
             p.textContent = messageText;
             contentDiv.appendChild(p);
         }
-
         if (imageBase64 && sender === 'user') {
             const img = document.createElement('img');
-            img.src = imageBase64;
-            img.alt = "uploaded-image";
+            img.src = imageBase64; img.alt = "uploaded-image";
             img.onclick = () => window.open(imageBase64);
             contentDiv.appendChild(img);
         }
-        
         messageElement.appendChild(contentDiv);
         return messageElement;
     }
 
     function addMessageToChatBox(message, sender, imageBase64 = null) {
-        const messageElement = createMessageElement(sender, message, imageBase64);
+        const messageElement = createMessage_element(sender, message, imageBase64);
         chatBox.appendChild(messageElement);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
@@ -239,9 +223,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (typingElement) typingElement.remove();
     }
     
-    // --- 麥克風和語音按鈕邏輯 (不變) ---
-    toggleSpeechBtn.style.display = 'none';
-    
+    // --- 麥克風邏輯 (不變) ---
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
