@@ -1,15 +1,16 @@
-# app.py
+# app.py (已修改為使用 requests 替代 Azure SDK)
 
 import os
 import base64
 import re
 import json
 import logging
+import requests  # <-- 新增：使用 requests 函式庫
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 import google.generativeai as genai
-import azure.cognitiveservices.speech as speechsdk
+# import azure.cognitiveservices.speech as speechsdk # <-- 已移除：不再需要 Azure SDK
 from PIL import Image
 import io
 
@@ -18,10 +19,9 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
-# Vercel 環境中，CORS 很重要，允許所有來源訪問 /api/ 路由
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# --- Gemini API 設定 ---
+# --- Gemini API 設定 (保持不變) ---
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 if not gemini_api_key:
     raise ValueError("請設定 GEMINI_API_KEY 環境變數")
@@ -58,17 +58,15 @@ model = genai.GenerativeModel(
     generation_config=genai.types.GenerationConfig(response_mime_type="application/json")
 )
 
-# --- Azure Speech API 設定 ---
+# --- Azure Speech API 設定 (已修改) ---
+# 我們不再需要建立 speech_config 物件，只需要從環境變數讀取金鑰和區域
 speech_key = os.getenv("SPEECH_KEY")
 speech_region = os.getenv("SPEECH_REGION")
-speech_config = None
-if speech_key and speech_region:
-    speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
-    speech_config.set_speech_synthesis_output_format(speechsdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3)
-else:
+
+if not (speech_key and speech_region):
     logging.warning("SPEECH_KEY 或 SPEECH_REGION 未設定，語音合成功能將被禁用。")
 
-# --- 輔助函式 ---
+# --- 輔助函式 (保持不變) ---
 def remove_emojis(text):
     emoji_pattern = re.compile(
         "["
@@ -100,14 +98,15 @@ def process_history_for_gemini(history):
              processed_history.append({'role': message['role'], 'parts': new_parts})
     return processed_history
 
+# --- 語音合成函式 (已完全重寫) ---
 def text_to_speech_azure_batch(segments):
-    if not speech_config:
+    if not (speech_key and speech_region):
         logging.warning("Azure Speech 未設定，跳過語音合成。")
         return None
         
+    # 1. 建立 SSML (這部分邏輯與之前完全相同)
     ssml_fragments = []
     style_map = { "cheerful": "cheerful", "comforting": "sad", "excited": "excited", "default": "default" }
-
     for segment in segments:
         style = segment.get("style", "default")
         degree = segment.get("degree", 1.0)
@@ -115,44 +114,42 @@ def text_to_speech_azure_batch(segments):
         pitch = segment.get("pitch", "0%")
         emphasis_word = segment.get("emphasis", "")
         text = segment.get("text", "")
-        
         clean_text = remove_emojis(text)
-        if not clean_text:
-            continue
-            
+        if not clean_text: continue
         azure_style = style_map.get(style, "default")
-        
-        processed_text = clean_text
-        if emphasis_word and emphasis_word in clean_text:
-            processed_text = clean_text.replace(emphasis_word, f'<emphasis level="strong">{emphasis_word}</emphasis>', 1)
-        
-        fragment = f"""
-        <mstts:express-as style='{azure_style}' styledegree='{degree}'>
-            <prosody rate='{rate}' pitch='{pitch}'>
-                {processed_text}
-            </prosody>
-        </mstts:express-as>
-        """
+        processed_text = clean_text.replace(emphasis_word, f'<emphasis level="strong">{emphasis_word}</emphasis>', 1) if emphasis_word else clean_text
+        fragment = f"<mstts:express-as style='{azure_style}' styledegree='{degree}'><prosody rate='{rate}' pitch='{pitch}'>{processed_text}</prosody></mstts:express-as>"
         ssml_fragments.append(fragment)
 
     if not ssml_fragments:
         return None
-
     final_ssml = f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='zh-TW'><voice name='zh-TW-HsiaoYuNeural'>{''.join(ssml_fragments)}</voice></speak>"
     
+    # 2. 設定 REST API 的請求參數
+    endpoint = f"https://{speech_region}.tts.speech.microsoft.com/cognitiveservices/v1"
+    headers = {
+        "Ocp-Apim-Subscription-Key": speech_key,
+        "Content-Type": "application/ssml+xml",
+        "X-Microsoft-OutputFormat": "audio-16khz-32kbitrate-mono-mp3",
+        "User-Agent": "YoyoAI"
+    }
+
+    # 3. 發送請求並處理回應
     try:
-        synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
-        result = synthesizer.speak_ssml_async(final_ssml).get()
-        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-            return base64.b64encode(result.audio_data).decode('utf-8')
+        response = requests.post(endpoint, data=final_ssml.encode('utf-8'), headers=headers)
+        if response.status_code == 200:
+            # 成功取得音檔，將其編碼為 Base64
+            return base64.b64encode(response.content).decode('utf-8')
         else:
-            logging.error(f"Azure 語音合成失敗: {result.cancellation_details}")
+            # 如果失敗，記錄下詳細錯誤以供排查
+            logging.error(f"Azure 語音合成 API 錯誤: {response.status_code}")
+            logging.error(f"錯誤訊息: {response.text}")
             return None
     except Exception as e:
-        logging.error(f"Azure TTS 發生未預期的錯誤: {e}")
+        logging.error(f"呼叫 Azure TTS API 時發生未預期的錯誤: {e}")
         return None
 
-# --- API Endpoint ---
+# --- API Endpoint (保持不變) ---
 @app.route('/api/chat', methods=['POST'])
 def chat():
     try:
@@ -165,7 +162,6 @@ def chat():
         latest_message_parts = process_history_for_gemini([history[-1]])[0]['parts']
 
         chat_session = model.start_chat(history=gemini_history)
-        
         response = chat_session.send_message(latest_message_parts)
 
         ai_segments = []
@@ -195,12 +191,10 @@ def chat():
         logging.error(f"/api/chat 發生錯誤: {e}", exc_info=True)
         return jsonify({"error": "伺服器內部發生錯誤"}), 500
 
-# 根路由，可以當作健康檢查點
+# --- 其他路由和啟動設定 (保持不變) ---
 @app.route('/')
 def home():
-    return "祐祐 AI 後端服務已啟動！"
+    return "祐祐 AI 後端服務已啟動！(v2 - no azure sdk)"
 
-# 這個區塊讓您可以在本地用 `python app.py` 進行測試
-# Vercel 在部署時會忽略這個區塊
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
