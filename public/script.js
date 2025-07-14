@@ -12,7 +12,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const fileInput = document.getElementById("file-input");
     const cameraInput = document.getElementById("camera-input");
 
-    const API_URL = "/api/chat"; 
+    const API_URL = "http://127.0.0.1:5000/api/chat";; 
 
     let conversationHistory = [];
     let currentAudio = null;
@@ -202,7 +202,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function addMessageToChatBox(message, sender, imageBase64 = null) {
-        const messageElement = createMessage_element(sender, message, imageBase64);
+        const messageElement = createMessageElement(sender, message, imageBase64);
         chatBox.appendChild(messageElement);
         chatBox.scrollTop = chatBox.scrollHeight;
     }

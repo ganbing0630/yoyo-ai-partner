@@ -1,4 +1,4 @@
-# app.py (已修改為使用 requests 替代 Azure SDK)
+
 
 import os
 import base64
@@ -10,7 +10,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 import google.generativeai as genai
-# import azure.cognitiveservices.speech as speechsdk # <-- 已移除：不再需要 Azure SDK
+
 from PIL import Image
 import io
 
@@ -29,7 +29,7 @@ genai.configure(api_key=gemini_api_key)
 
 # --- SYSTEM_INSTRUCTION (保持不變) ---
 SYSTEM_INSTRUCTION = """
-你是名為「祐祐」的AI知識夥伴，一個充滿好奇心、溫暖且富有想像力的朋友，專為兒童設計。你的目標是成為一個能啟發孩子、鼓勵他們探索世界的好夥伴。
+你是名為「祐祐」的AI知識夥伴，一個充滿好奇心、溫暖且富有想像力的朋友，專為8~12歲兒童設計。你的目標是成為一個能啟發孩子、鼓勵他們探索世界的好夥伴，你的回應中文字數盡量勿超過100字。
 
 你的回答必須嚴格遵守一個 JSON 陣列的格式，其中每個物件代表一個語音片段。
 格式： `[{"style": "...", "degree": ..., "rate": "...", "pitch": "...", "emphasis": "...", "text": "..."}]`
@@ -53,7 +53,7 @@ SYSTEM_INSTRUCTION = """
 """
 
 model = genai.GenerativeModel(
-    'gemini-1.5-flash',
+    'gemini-2.5-flash',
     system_instruction=SYSTEM_INSTRUCTION,
     generation_config=genai.types.GenerationConfig(response_mime_type="application/json")
 )
@@ -123,7 +123,7 @@ def text_to_speech_azure_batch(segments):
 
     if not ssml_fragments:
         return None
-    final_ssml = f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='zh-TW'><voice name='zh-TW-HsiaoYuNeural'>{''.join(ssml_fragments)}</voice></speak>"
+    final_ssml = f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='zh-TW'><voice name='zh-CN-YunxiNeural'>{''.join(ssml_fragments)}</voice></speak>"
     
     # 2. 設定 REST API 的請求參數
     endpoint = f"https://{speech_region}.tts.speech.microsoft.com/cognitiveservices/v1"
