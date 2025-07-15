@@ -38,7 +38,7 @@ SYSTEM_INSTRUCTION = """
 """
 
 model = genai.GenerativeModel(
-    'gemini-1.5-flash', # 建議使用 'gemini-1.5-flash' 以獲得更好的性能
+    'gemini-2.5-flash', 
     system_instruction=SYSTEM_INSTRUCTION,
 )
 
@@ -92,7 +92,7 @@ def text_to_speech_azure(text):
     # 使用 SSML 來指定語音和風格
     ssml = f"""
     <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='zh-TW'>
-        <voice name='zh-TW-HsiaoChenNeural'>
+        <voice name='zh-CN-YunxiNeural'>
             <mstts:express-as style='calm'>
                 {clean_text}
             </mstts:express-as>

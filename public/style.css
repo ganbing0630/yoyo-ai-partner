@@ -1,4 +1,4 @@
-/* style.css */
+/* style.css (已修正手機版面問題) */
 :root {
     --primary-color: #4A90E2;
     --secondary-color: #F5A623;
@@ -142,7 +142,7 @@ body {
 #chat-form {
     display: flex;
     align-items: center;
-    gap: 8px; /* 稍微縮小按鈕間距 */
+    gap: 6px; /* ✨修正: 縮小按鈕間距以節省空間 */
 }
 
 #user-input {
@@ -152,6 +152,7 @@ body {
     padding: 10px 15px;
     font-size: 1em;
     outline: none;
+    min-width: 0; /* ✨關鍵修正: 允許輸入框在空間不足時被壓縮 */
 }
 
 #user-input:focus {
@@ -161,8 +162,8 @@ body {
 #chat-form button {
     border: none;
     border-radius: 50%;
-    width: 42px;
-    height: 42px;
+    width: 40px;  /* ✨修正: 稍微縮小按鈕尺寸 */
+    height: 40px; /* ✨修正: 稍微縮小按鈕尺寸 */
     font-size: 1.2em;
     cursor: pointer;
     flex-shrink: 0;
@@ -170,6 +171,7 @@ body {
     justify-content: center;
     align-items: center;
     transition: background-color 0.3s, color 0.3s, transform 0.2s;
+    padding: 0; /* 確保沒有內邊距影響尺寸 */
 }
 
 #chat-form button[type="submit"] {
@@ -186,9 +188,9 @@ body {
 #upload-btn, #camera-btn {
     background-color: #f0f0f0;
     color: #555;
-    font-size: 1.4em; /* 調整圖示大小 */
+    font-size: 1.4em; 
     padding: 0;
-    flex-shrink: 0; /* 防止按鈕被壓縮 */
+    flex-shrink: 0;
 }
 
 #upload-btn:hover, #camera-btn:hover {
@@ -224,6 +226,7 @@ body {
     background-color: #e0f0ff;
 }
 
+/* (以下為舊有樣式，無變動) */
 .typing-indicator p::after {
     content: '';
     display: inline-block;
