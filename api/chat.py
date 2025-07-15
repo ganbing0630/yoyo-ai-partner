@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# --- Render Redis 連線設定 ---
+# --- Redis 連線設定 ---
 redis_client = None
 redis_url = os.getenv('REDIS_URL')
 if redis_url:
@@ -65,21 +65,22 @@ speech_region = os.getenv("SPEECH_REGION")
 if not (speech_key and speech_region):
     logging.warning("SPEECH_KEY 或 SPEECH_REGION 未設定，語音合成功能將被禁用。")
 
-# --- 輔助函式：移除表情符號 ---
-def remove_emojis(text):
-    emoji_pattern = re.compile("["
-        u"\U0001F600-\U0001F64F"  # emoticons
-        u"\U0001F300-\U0001F5FF"  # symbols & pictographs
-        u"\U0001F680-\U0001F6FF"  # transport & map symbols
-        u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-        u"\U00002702-\U000027B0"
-        u"\U000024C2-\U0001F251"
-        u"\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
-        "]+", flags=re.UNICODE)
-    return emoji_pattern.sub(r'', text).strip()
+# === 核心修正點：更強大的文字淨化函式 ===
+def cleanup_text_for_speech(text):
+    """
+    這是一個更強大的清理函式。
+    它只保留中文、英文、數字和一些基本標點符號。
+    所有表情符號、特殊符號、Markdown標記等都會被移除。
+    """
+    # 正則表達式：匹配任何不在白名單內的字元
+    # 白名單包括：中文字元, 英文字母大小寫, 數字, 和一些常用標點
+    pattern = re.compile(r'[^\u4e00-\u9fa5a-zA-Z0-9，。？！、\s]')
+    cleaned_text = re.sub(pattern, '', text)
+    return cleaned_text.strip() # 移除頭尾多餘的空格
 
 # --- 輔助函式：處理前端傳來的歷史紀錄 ---
 def process_history_for_gemini(history):
+    # (此函式無變動)
     processed_history = []
     for message in history:
         new_parts = []
@@ -102,11 +103,11 @@ def process_history_for_gemini(history):
 
 # --- 語音合成函式 ---
 def text_to_speech_azure(text_to_speak):
+    # (此函式無變動)
     if not (speech_key and speech_region):
         logging.warning("Azure Speech 未設定，跳過語音合成。")
         return None
     
-    # 傳入的文字應該已經被清理過，這裡做最後的防線
     if not text_to_speak:
         logging.warning("沒有可供語音合成的有效文字。")
         return None
@@ -123,8 +124,7 @@ def text_to_speech_azure(text_to_speak):
     try:
         response = requests.post(endpoint, data=ssml.encode('utf-8'), headers=headers)
         response.raise_for_status()
-        # 增加一個檢查，確保我們有收到有效的音訊資料
-        if response.content and len(response.content) > 100: # 100 bytes 作為一個合理的最小 MP3 檔案大小
+        if response.content and len(response.content) > 100:
             logging.info("Azure TTS API 成功回應並收到有效的音訊資料。")
             return base64.b64encode(response.content).decode('utf-8')
         else:
@@ -137,6 +137,7 @@ def text_to_speech_azure(text_to_speak):
 # --- 主要 API 端點 ---
 @app.route('/api/chat', methods=['POST'])
 def chat():
+    # (此函式主要邏輯無變動，僅串接新的清理函式)
     try:
         data = request.json
         history = data.get("history", [])
@@ -146,16 +147,6 @@ def chat():
             return jsonify({"error": "history 和 userId 不可為空"}), 400
 
         logging.info(f"收到來自 User ID: {user_id} 的請求")
-        
-        gemini_history_for_chat = []
-        if redis_client:
-            try:
-                pickled_history = redis_client.get(user_id)
-                if pickled_history:
-                    gemini_history_for_chat = pickle.loads(pickled_history)
-                    logging.info(f"為 User ID: {user_id} 從 Redis 載入對話歷史。")
-            except Exception as e:
-                logging.error(f"從 Redis 讀取 history 失敗: {e}")
         
         gemini_history_for_chat = process_history_for_gemini(history[:-1])
         chat_session = model.start_chat(history=gemini_history_for_chat)
@@ -184,13 +175,10 @@ def chat():
                 except Exception as e:
                     logging.error(f"儲存 history 至 Redis 失敗: {e}")
             
-            # === 核心修正點 ===
-            # 1. 在呼叫語音合成之前，先清理文字
-            text_for_speech = remove_emojis(final_text)
-            # 2. 增加日誌，確認清理後的結果
+            # === 使用我們全新的、強大的清理函式 ===
+            text_for_speech = cleanup_text_for_speech(final_text)
             logging.info(f"清理後準備合成語音的文字: '{text_for_speech[:50]}...'")
 
-            # 3. 使用清理後的文字進行語音合成
             audio_base64 = text_to_speech_azure(text_for_speech)
             if audio_base64:
                 yield SEPARATOR
