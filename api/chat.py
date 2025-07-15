@@ -150,7 +150,7 @@ def text_to_speech_azure_batch(segments):
         return None
 
 # --- API Endpoint ---
-@app.route('/chat', methods=['POST'])
+@app.route('/', methods=['POST'])
 def chat():
     # --- 日誌：這是最重要的日誌！如果我們看不到它，代表請求從未到達這裡 ---
     logging.critical("--- /chat ROUTE FUNCTION STARTED ---")
