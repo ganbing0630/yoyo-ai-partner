@@ -1,4 +1,4 @@
-/* style.css (已修正手機版面問題) */
+/* style.css (已修正手機版面問題並加入靜音樣式) */
 :root {
     --primary-color: #4A90E2;
     --secondary-color: #F5A623;
@@ -54,7 +54,6 @@ body {
     gap: 15px;
 }
 
-/* --- 修改後的訊息樣式 --- */
 .message {
     display: flex;
     max-width: 85%;
@@ -64,8 +63,8 @@ body {
 
 .message p {
     margin: 0;
-    white-space: pre-wrap; /* 讓換行符生效 */
-    word-wrap: break-word; /* 處理長單詞 */
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 .avatar {
@@ -100,16 +99,6 @@ body {
     border-bottom-left-radius: 5px;
 }
     
-.typing-indicator {
-    background-color: transparent;
-}
-.typing-indicator .message-content {
-    color: #888;
-    font-style: italic;
-    background-color: var(--ai-msg-bg);
-}
-
-/* 使用者訊息中的圖片 */
 .user-message .message-content img {
     max-width: 100%;
     border-radius: 10px;
@@ -117,8 +106,6 @@ body {
     cursor: pointer;
 }
 
-
-/* --- 打字機效果 --- */
 .typing-cursor::after {
     content: '▋';
     animation: blink 1s step-end infinite;
@@ -132,7 +119,6 @@ body {
     50% { opacity: 0; }
 }
 
-/* --- 輸入區 --- */
 .chat-input-area {
     padding: 15px 20px;
     border-top: 1px solid #ddd;
@@ -142,7 +128,7 @@ body {
 #chat-form {
     display: flex;
     align-items: center;
-    gap: 6px; /* ✨修正: 縮小按鈕間距以節省空間 */
+    gap: 6px;
 }
 
 #user-input {
@@ -152,7 +138,7 @@ body {
     padding: 10px 15px;
     font-size: 1em;
     outline: none;
-    min-width: 0; /* ✨關鍵修正: 允許輸入框在空間不足時被壓縮 */
+    min-width: 0;
 }
 
 #user-input:focus {
@@ -162,16 +148,16 @@ body {
 #chat-form button {
     border: none;
     border-radius: 50%;
-    width: 40px;  /* ✨修正: 稍微縮小按鈕尺寸 */
-    height: 40px; /* ✨修正: 稍微縮小按鈕尺寸 */
+    width: 40px;
+    height: 40px;
     font-size: 1.2em;
     cursor: pointer;
     flex-shrink: 0;
     display: flex;
     justify-content: center;
     align-items: center;
-    transition: background-color 0.3s, color 0.3s, transform 0.2s;
-    padding: 0; /* 確保沒有內邊距影響尺寸 */
+    transition: background-color 0.3s, color 0.3s, transform 0.2s, opacity 0.3s;
+    padding: 0;
 }
 
 #chat-form button[type="submit"] {
@@ -184,7 +170,6 @@ body {
     transform: scale(1.1);
 }
 
-/* 新增上傳按鈕樣式 */
 #upload-btn, #camera-btn {
     background-color: #f0f0f0;
     color: #555;
@@ -214,7 +199,7 @@ body {
 #toggle-speech-btn {
     background-color: #f0f0f0;
     color: #888;
-    display: none;
+    /* `display: none` is no longer used here */
 }
 
 #toggle-speech-btn:hover {
@@ -226,26 +211,7 @@ body {
     background-color: #e0f0ff;
 }
 
-/* (以下為舊有樣式，無變動) */
-.typing-indicator p::after {
-    content: '';
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background-color: #888;
-    margin-left: 10px;
-    animation: typing-bounce 1.4s infinite ease-in-out;
-    box-shadow: 14px 0 0 0 #888, 28px 0 0 0 #888;
-}
-
-@keyframes typing-bounce {
-    0%, 80%, 100% { transform: scale(0); box-shadow: 14px 0 0 0 #888, 28px 0 0 0 #888;}
-    40% { transform: scale(1.0); box-shadow: 14px 0 0 0 #888, 28px 0 0 0 #888;}
-    20% { box-shadow: 14px 0 0 0 rgba(136,136,136,0.3), 28px 0 0 0 rgba(136,136,136,0.3); }
-    60% { box-shadow: 14px 0 0 0 #888, 28px 0 0 0 rgba(136,136,136,0.3); }
-}
-
+/* 新增：靜音按鈕的樣式 */
 #toggle-speech-btn.muted {
     background-color: #f0f0f0;
     opacity: 0.6; /* 讓按鈕變灰暗一點，表示非作用中 */
