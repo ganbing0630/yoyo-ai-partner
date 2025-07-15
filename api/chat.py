@@ -25,7 +25,7 @@ if not gemini_api_key:
     raise ValueError("請設定 GEMINI_API_KEY 環境變數")
 genai.configure(api_key=gemini_api_key)
 
-# --- 簡化後的系統提示 (不再有任何 JSON 規則) ---
+# --- 系統提示 ---
 SYSTEM_INSTRUCTION = """
 你是名為「祐祐」的AI知識夥伴，一個充滿好奇心、溫暖且富有想像力的朋友，專為8~12歲兒童設計。你的目標是成為一個能啟發孩子、鼓勵他們探索世界的好夥伴，你的回應中文字數盡量勿超過100字。
 
@@ -37,9 +37,8 @@ SYSTEM_INSTRUCTION = """
 5.  **永遠保持正面與安全**：你的語言必須簡單、正面、充滿善意。絕不生成任何不適合兒童的內容，也絕不提及你是 AI 或模型。
 """
 
-# --- 只保留一個用於對話的模型 ---
 model = genai.GenerativeModel(
-    'gemini-2.5-flash',
+    'gemini-1.5-flash', # 建議使用 'gemini-1.5-flash' 以獲得更好的性能
     system_instruction=SYSTEM_INSTRUCTION,
 )
 
@@ -50,7 +49,6 @@ speech_region = os.getenv("SPEECH_REGION")
 if not (speech_key and speech_region):
     logging.warning("SPEECH_KEY 或 SPEECH_REGION 未設定，語音合成功能將被禁用。")
 
-# --- 輔助函式 (不變) ---
 def remove_emojis(text):
     emoji_pattern = re.compile("["
         "\U0001F600-\U0001F64F" "\U0001F300-\U0001F5FF" "\U0001F680-\U0001F6FF"
@@ -60,7 +58,6 @@ def remove_emojis(text):
     return emoji_pattern.sub(r'', text).strip()
 
 def process_history_for_gemini(history):
-    # ... (這個函式不需要任何修改) ...
     processed_history = []
     for message in history:
         new_parts = []
@@ -69,7 +66,9 @@ def process_history_for_gemini(history):
             if isinstance(part, dict) and 'inline_data' in part:
                 try:
                     image_data = part['inline_data']
-                    img_bytes = base64.b64decode(image_data['data'])
+                    # 移除 data:image/jpeg;base64, 前缀
+                    header, encoded = image_data['data'].split(",", 1)
+                    img_bytes = base64.b64decode(encoded)
                     img = Image.open(io.BytesIO(img_bytes))
                     new_parts.append(img)
                 except Exception as e:
@@ -82,7 +81,6 @@ def process_history_for_gemini(history):
     return processed_history
 
 
-# --- 簡化後的語音合成函式 (只接收純文字) ---
 def text_to_speech_azure(text):
     if not (speech_key and speech_region):
         logging.warning("Azure Speech 未設定，跳過語音合成。")
@@ -91,42 +89,61 @@ def text_to_speech_azure(text):
     clean_text = remove_emojis(text)
     if not clean_text: return None
 
-    # 使用最基礎的 SSML 結構來包裹純文字
-    final_ssml = f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-TW'><voice name='zh-CN-YunxiNeural'>{clean_text}</voice></speak>"
+    # 使用 SSML 來指定語音和風格
+    ssml = f"""
+    <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='zh-TW'>
+        <voice name='zh-TW-HsiaoChenNeural'>
+            <mstts:express-as style='calm'>
+                {clean_text}
+            </mstts:express-as>
+        </voice>
+    </speak>
+    """
     
     endpoint = f"https://{speech_region}.tts.speech.microsoft.com/cognitiveservices/v1"
-    headers = {"Ocp-Apim-Subscription-Key": speech_key, "Content-Type": "application/ssml+xml", "X-Microsoft-OutputFormat": "audio-16khz-32kbitrate-mono-mp3", "User-Agent": "YoyoAI"}
+    headers = {
+        "Ocp-Apim-Subscription-Key": speech_key,
+        "Content-Type": "application/ssml+xml",
+        "X-Microsoft-OutputFormat": "audio-16khz-32kbitrate-mono-mp3",
+        "User-Agent": "YoyoAI"
+    }
     
     try:
-        response = requests.post(endpoint, data=final_ssml.encode('utf-8'), headers=headers)
-        if response.status_code == 200:
-            return base64.b64encode(response.content).decode('utf-8')
-        else:
-            logging.error(f"Azure 語音合成 API 錯誤: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        logging.error(f"呼叫 Azure TTS API 時發生未預期的錯誤: {e}")
+        response = requests.post(endpoint, data=ssml.encode('utf-8'), headers=headers)
+        response.raise_for_status() # 如果狀態碼不是 200，會引發 HTTPError
+        return base64.b64encode(response.content).decode('utf-8')
+    except requests.exceptions.RequestException as e:
+        logging.error(f"呼叫 Azure TTS API 時發生錯誤: {e}")
         return None
 
-# --- 最終簡化的單一 API 端點 ---
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    logging.info("--- /api/chat SIMPLIFIED STREAM FUNCTION STARTED ---")
+    logging.info("--- 啟動混合式串流 API (/api/chat) ---")
     try:
         data = request.json
         history = data.get("history", [])
-        if not history: return jsonify({"error": "歷史紀錄不可為空"}), 400
+        if not history: 
+            return jsonify({"error": "歷史紀錄不可為空"}), 400
         
+        # 處理對話歷史以符合 Gemini 的格式
         gemini_history = process_history_for_gemini(history[:-1])
         latest_message_parts = process_history_for_gemini([history[-1]])[0]['parts']
+        
+        # 建立對話工作階段
         chat_session = model.start_chat(history=gemini_history)
         
         def generate_hybrid_stream():
-            SEPARATOR = "---YOYO_AUDIO_SEPARATOR---" # 更新分隔符名稱以反映內容
+            """
+            這個生成器函式是整個流程的核心。
+            它首先以流式傳輸 Gemini 的純文字回應。
+            在文字流結束後，它生成對應的語音。
+            最後，它發送一個分隔符和 Base64 編碼的語音數據。
+            """
+            SEPARATOR = "---YOYO_AUDIO_SEPARATOR---"
             full_text_list = []
             
-            # --- 階段一: 串流純文字 ---
-            logging.info("Streaming plain text from Gemini...")
+            # --- 階段一: 從 Gemini 串流純文字 ---
+            logging.info("開始從 Gemini 串流文字...")
             response_stream = chat_session.send_message(latest_message_parts, stream=True)
             for chunk in response_stream:
                 if chunk.text:
@@ -134,21 +151,20 @@ def chat():
                     full_text_list.append(chunk.text)
             
             final_text = "".join(full_text_list)
-            logging.info(f"Plain text streaming finished. Full text: {final_text}")
+            logging.info(f"文字串流結束。完整文字: '{final_text[:50]}...'")
 
-            # --- 階段二: 用完整的純文字合成語音 ---
-            logging.info("Synthesizing audio from full text...")
+            # --- 階段二: 使用完整的文字合成語音 ---
+            logging.info("開始合成語音...")
             audio_base64 = text_to_speech_azure(final_text)
-            logging.info("Audio synthesis finished.")
+            logging.info(f"語音合成結束。{'成功' if audio_base64 else '失敗'}")
             
             # --- 階段三: 發送分隔符和 Base64 音訊 ---
             yield SEPARATOR
-            yield audio_base64 or "" # 如果合成失敗，則回傳空字串
+            if audio_base64:
+                yield audio_base64
 
         return Response(stream_with_context(generate_hybrid_stream()), mimetype='text/plain; charset=utf-8')
 
     except Exception as e:
-        logging.critical(f"--- UNHANDLED EXCEPTION IN /api/chat: {e} ---", exc_info=True)
+        logging.critical(f"--- 在 /api/chat 中發生未處理的例外: {e} ---", exc_info=True)
         return Response("伺服器內部發生未知錯誤", status=500)
-
-# --- /api/tts 端點已被移除 ---
