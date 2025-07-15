@@ -58,7 +58,7 @@ SYSTEM_INSTRUCTION = """
 """
 
 model = genai.GenerativeModel(
-    'gemini-1.5-flash',
+    'gemini-2.5-flash',
     system_instruction=SYSTEM_INSTRUCTION,
 )
 
@@ -119,7 +119,7 @@ def text_to_speech_azure(text):
 
     logging.info(f"正在為文字呼叫 Azure TTS API: '{clean_text[:30]}...'")
     
-    ssml = f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-TW'><voice name='zh-TW-HsiaoChenNeural'>{clean_text}</voice></speak>"
+    ssml = f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-TW'><voice name='zh-CN-YunxiNeural'>{clean_text}</voice></speak>"
     
     endpoint = f"https://{speech_region}.tts.speech.microsoft.com/cognitiveservices/v1"
     headers = {
@@ -196,10 +196,12 @@ def chat():
                 except Exception as e:
                     logging.error(f"儲存 session 至 Redis 失敗: {e}")
 
-            # 合成語音並串流回傳
+            # === 核心修正點 ===
+            # 先嘗試合成語音
             audio_base64 = text_to_speech_azure(final_text)
-            yield SEPARATOR
+            # 只有在 audio_base64 確實有內容 (不是 None) 的情況下，才發送分隔符和音訊
             if audio_base64:
+                yield SEPARATOR
                 yield audio_base64
 
         return Response(stream_with_context(generate_hybrid_stream()), mimetype='text/plain; charset=utf-8')
