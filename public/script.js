@@ -11,7 +11,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const fileInput = document.getElementById("file-input");
     const cameraInput = document.getElementById("camera-input");
 
-    const CHAT_API_URL = "https://yoyo-ai-partner-backend.onrender.com/api/chat"; // 請確保這是你後端的正確網址
+    const CHAT_API_URL = "https://yoyo-ai-partner.onrender.com/api/chat"; // 請確保這是你後端的正確網址
 
     let conversationHistory = [];
     let currentAudio = null;
