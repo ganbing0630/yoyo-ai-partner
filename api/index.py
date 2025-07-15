@@ -19,7 +19,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # --- Gemini API 設定 (保持不變) ---
 gemini_api_key = os.getenv("GEMINI_API_KEY")
@@ -150,7 +150,7 @@ def text_to_speech_azure_batch(segments):
         return None
 
 # --- API Endpoint (保持不變) ---
-@app.route('/api/chat', methods=['POST'])
+@app.route('/chat', methods=['POST'])
 def chat():
     try:
         data = request.json
@@ -188,7 +188,7 @@ def chat():
         })
 
     except Exception as e:
-        logging.error(f"/api/chat 發生錯誤: {e}", exc_info=True)
+        logging.error(f"/chat 發生錯誤: {e}", exc_info=True)
         return jsonify({"error": "伺服器內部發生錯誤"}), 500
 
 # --- 其他路由和啟動設定 (保持不變) ---
