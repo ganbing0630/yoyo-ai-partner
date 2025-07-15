@@ -245,3 +245,8 @@ body {
     20% { box-shadow: 14px 0 0 0 rgba(136,136,136,0.3), 28px 0 0 0 rgba(136,136,136,0.3); }
     60% { box-shadow: 14px 0 0 0 #888, 28px 0 0 0 rgba(136,136,136,0.3); }
 }
+
+#toggle-speech-btn.muted {
+    background-color: #f0f0f0;
+    opacity: 0.6; /* 讓按鈕變灰暗一點，表示非作用中 */
+}

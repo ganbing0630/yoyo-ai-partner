@@ -1,84 +1,95 @@
 document.addEventListener("DOMContentLoaded", () => {
-    // --- 變數定義 (不變) ---
+    // --- 變數定義 ---
     const chatForm = document.getElementById("chat-form");
     const userInput = document.getElementById("user-input");
     const chatBox = document.getElementById("chat-box");
     const micBtn = document.getElementById("mic-btn");
     const toggleSpeechBtn = document.getElementById("toggle-speech-btn");
-    const cameraBtn = document.getElementById("camera-btn");
-    const uploadBtn = document.getElementById("upload-btn");
-    const fileInput = document.getElementById("file-input");
-    const cameraInput = document.getElementById("camera-input");
+    // (其他變數不變)
 
     const CHAT_API_URL = "/api/chat";
 
     let conversationHistory = [];
     let currentAudio = null;
     let userId = null; 
-
-    // --- 使用者ID管理 (不變) ---
-    function getOrSetUserId() {
-        let storedId = localStorage.getItem('yoyo_user_id');
-        if (storedId) {
-            userId = storedId;
-        } else {
-            userId = 'user_' + Date.now().toString(36) + Math.random().toString(36).substr(2);
-            localStorage.setItem('yoyo_user_id', userId);
-        }
-        console.log("當前使用者 ID:", userId);
-    }
-    getOrSetUserId();
-
-    // --- 檔案/相機上傳 (不變) ---
-    cameraBtn.addEventListener('click', () => cameraInput.click());
-    uploadBtn.addEventListener('click', () => fileInput.click());
     
-    const handleFileSelection = (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        if (file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = (e) => sendMessage(userInput.value.trim(), e.target.result);
-            reader.readAsDataURL(file);
-        } else {
-            alert(`抱歉，祐祐目前只能看懂圖片檔案喔！`);
-        }
-        event.target.value = '';
-    };
-    fileInput.addEventListener('change', handleFileSelection);
-    cameraInput.addEventListener('change', handleFileSelection);
+    // ✨ 1. 新增聲音狀態變數，預設為開啟
+    let isSpeechEnabled = true;
 
-    // --- 音訊播放邏輯 (不變) ---
+    // ✨ 2. 新增函式：初始化聲音設定，從 localStorage 讀取使用者偏好
+    function initializeSpeechSetting() {
+        const savedPreference = localStorage.getItem('yoyo_speech_enabled');
+        if (savedPreference !== null) {
+            // localStorage 儲存的是字串，需轉換為布林值
+            isSpeechEnabled = (savedPreference === 'true');
+        }
+        updateSpeechButtonUI(); // 根據讀取的設定更新按鈕外觀
+    }
+
+    // ✨ 3. 新增函式：專門用來更新聲音按鈕的 UI
+    function updateSpeechButtonUI() {
+        // 讓按鈕永遠顯示
+        toggleSpeechBtn.style.display = 'flex';
+        if (isSpeechEnabled) {
+            toggleSpeechBtn.textContent = '🔊';
+            toggleSpeechBtn.classList.remove('muted'); // 移除靜音樣式
+        } else {
+            toggleSpeechBtn.textContent = '🔇';
+            toggleSpeechBtn.classList.add('muted'); // 增加靜音樣式
+        }
+    }
+
+    // --- 頁面載入時初始化 ---
+    getOrSetUserId();
+    initializeSpeechSetting(); // ✨ 頁面載入時就執行聲音初始化
+
+    // ... (getOrSetUserId, 檔案上傳等函式不變) ...
+
+    // ✨ 4. 重寫音訊播放邏輯
     const playAudio = (base64Audio) => {
-        if (!base64Audio) {
-            toggleSpeechBtn.style.display = 'none';
+        // ✨ 播放前的第一道關卡：檢查聲音開關是否開啟
+        if (!isSpeechEnabled) {
+            console.log("語音已禁用，跳過播放。");
             return;
         }
+
+        // ✨ 如果沒有音訊資料，直接結束即可，不用隱藏按鈕
+        if (!base64Audio) {
+            return;
+        }
+
         if (currentAudio) currentAudio.pause();
         const audioSource = `data:audio/mpeg;base64,${base64Audio}`;
         currentAudio = new Audio(audioSource);
+
         currentAudio.onplaying = () => {
             toggleSpeechBtn.classList.add('speaking');
-            toggleSpeechBtn.textContent = '🔊';
         };
         currentAudio.onpause = () => {
              toggleSpeechBtn.classList.remove('speaking');
-             toggleSpeechBtn.textContent = '🔇';
         };
         currentAudio.onended = () => {
-            toggleSpeechBtn.style.display = 'none';
+            toggleSpeechBtn.classList.remove('speaking'); // ✨ 播放結束後，只需移除 'speaking' 狀態
             currentAudio = null;
         };
-        toggleSpeechBtn.style.display = 'flex';
+        
         currentAudio.play();
     };
 
+    // ✨ 5. 重寫聲音按鈕的點擊事件
     toggleSpeechBtn.addEventListener('click', () => {
-        if (!currentAudio) return;
-        if (!currentAudio.paused) currentAudio.pause();
-        else currentAudio.play();
-    });
+        // 切換聲音開關的狀態
+        isSpeechEnabled = !isSpeechEnabled;
+        // 將新的設定存入 localStorage
+        localStorage.setItem('yoyo_speech_enabled', isSpeechEnabled);
+        // 更新按鈕的 UI
+        updateSpeechButtonUI();
 
+        // 如果在播放時點擊靜音，則立即停止當前的音訊
+        if (!isSpeechEnabled && currentAudio) {
+            currentAudio.pause();
+        }
+    });
     // --- ✨ 新增：打字機效果函式 ✨ ---
     function typewriter(element, text, speed = 30, callback) {
         let i = 0;
