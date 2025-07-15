@@ -1,4 +1,4 @@
-// script.js (已修正)
+// script.js (已修正靜音後無法再次播放的 Bug)
 document.addEventListener("DOMContentLoaded", () => {
     // --- 變數定義 ---
     const chatForm = document.getElementById("chat-form");
@@ -11,39 +11,32 @@ document.addEventListener("DOMContentLoaded", () => {
     const fileInput = document.getElementById("file-input");
     const cameraInput = document.getElementById("camera-input");
 
-    const CHAT_API_URL = "https://yoyo-ai-partner.onrender.com/api/chat";
+    const CHAT_API_URL = "https://yoyo-ai-partner-backend.onrender.com/api/chat"; // 請確保這是你後端的正確網址
 
     let conversationHistory = [];
     let currentAudio = null;
     let userId = null;
-    
-    // 1. 新增聲音狀態變數，預設為開啟
     let isSpeechEnabled = true;
 
-    // 2. 新增函式：初始化聲音設定，從 localStorage 讀取使用者偏好
     function initializeSpeechSetting() {
         const savedPreference = localStorage.getItem('yoyo_speech_enabled');
         if (savedPreference !== null) {
-            // localStorage 儲存的是字串，需轉換為布林值
             isSpeechEnabled = (savedPreference === 'true');
         }
-        updateSpeechButtonUI(); // 根據讀取的設定更新按鈕外觀
+        updateSpeechButtonUI();
     }
 
-    // 3. 新增函式：專門用來更新聲音按鈕的 UI
     function updateSpeechButtonUI() {
-        // 讓按鈕永遠顯示
         toggleSpeechBtn.style.display = 'flex'; 
         if (isSpeechEnabled) {
             toggleSpeechBtn.textContent = '🔊';
-            toggleSpeechBtn.classList.remove('muted'); // 移除靜音樣式
+            toggleSpeechBtn.classList.remove('muted');
         } else {
             toggleSpeechBtn.textContent = '🔇';
-            toggleSpeechBtn.classList.add('muted'); // 增加靜音樣式
+            toggleSpeechBtn.classList.add('muted');
         }
     }
     
-    // --- 使用者ID管理 ---
     function getOrSetUserId() {
         let storedId = localStorage.getItem('yoyo_user_id');
         if (storedId) {
@@ -55,11 +48,9 @@ document.addEventListener("DOMContentLoaded", () => {
         console.log("當前使用者 ID:", userId);
     }
     
-    // --- 頁面載入時初始化 ---
     getOrSetUserId();
-    initializeSpeechSetting(); // 頁面載入時就執行聲音初始化
+    initializeSpeechSetting();
 
-    // --- 檔案/相機上傳 ---
     cameraBtn.addEventListener('click', () => cameraInput.click());
     uploadBtn.addEventListener('click', () => fileInput.click());
     
@@ -78,73 +69,60 @@ document.addEventListener("DOMContentLoaded", () => {
     fileInput.addEventListener('change', handleFileSelection);
     cameraInput.addEventListener('change', handleFileSelection);
 
-    // 4. 重寫音訊播放邏輯
     const playAudio = (base64Audio) => {
-        // 播放前的第一道關卡：檢查聲音開關是否開啟
         if (!isSpeechEnabled) {
             console.log("語音已禁用，跳過播放。");
             return;
         }
-
-        // 如果沒有音訊資料，直接結束即可，不用隱藏按鈕
         if (!base64Audio) {
             return;
         }
-
         if (currentAudio) currentAudio.pause();
         const audioSource = `data:audio/mpeg;base64,${base64Audio}`;
         currentAudio = new Audio(audioSource);
 
-        currentAudio.onplaying = () => {
-            toggleSpeechBtn.classList.add('speaking');
-        };
-        currentAudio.onpause = () => {
-             toggleSpeechBtn.classList.remove('speaking');
-        };
+        currentAudio.onplaying = () => toggleSpeechBtn.classList.add('speaking');
+        currentAudio.onpause = () => toggleSpeechBtn.classList.remove('speaking');
         currentAudio.onended = () => {
-            toggleSpeechBtn.classList.remove('speaking'); // 播放結束後，只需移除 'speaking' 狀態
+            toggleSpeechBtn.classList.remove('speaking');
             currentAudio = null;
         };
-        
         currentAudio.play();
     };
 
-    // 5. 重寫聲音按鈕的點擊事件
+    // --- 核心修正點 ---
     toggleSpeechBtn.addEventListener('click', () => {
-        // 切換聲音開關的狀態
         isSpeechEnabled = !isSpeechEnabled;
-        // 將新的設定存入 localStorage
         localStorage.setItem('yoyo_speech_enabled', isSpeechEnabled);
-        // 更新按鈕的 UI
         updateSpeechButtonUI();
 
         // 如果在播放時點擊靜音，則立即停止當前的音訊
         if (!isSpeechEnabled && currentAudio) {
             currentAudio.pause();
+            // 加上這一行，來徹底清除被暫停的「幽靈音訊」
+            currentAudio = null; 
         }
     });
 
-    // --- 打字機效果函式 ---
     function typewriter(element, text, speed = 30, callback) {
         let i = 0;
-        element.textContent = ""; // 先清空內容
-        element.classList.remove('typing-cursor'); // 開始打字前，先移除閃爍的游標
+        element.textContent = "";
+        element.classList.remove('typing-cursor');
 
         const interval = setInterval(() => {
             if (i < text.length) {
                 element.textContent += text.charAt(i);
                 i++;
-                chatBox.scrollTop = chatBox.scrollHeight; // 隨時滾動到底部
+                chatBox.scrollTop = chatBox.scrollHeight;
             } else {
-                clearInterval(interval); // 文字顯示完畢，清除計時器
+                clearInterval(interval);
                 if (callback) {
-                    callback(); // 呼叫回呼函式 (例如：播放音訊)
+                    callback();
                 }
             }
         }, speed);
     }
 
-    // --- 訊息發送與串流處理核心函式 ---
     const sendMessage = async (message, imageBase64 = null) => {
         if (!message && !imageBase64) return;
         
@@ -217,13 +195,11 @@ document.addEventListener("DOMContentLoaded", () => {
         } 
     };
 
-    // --- 提交表單邏輯 ---
     chatForm.addEventListener("submit", (e) => {
         e.preventDefault();
         sendMessage(userInput.value.trim());
     });
 
-    // --- UI 輔助函式 ---
     function createMessageElement(sender, messageText = "", imageBase64 = null) {
         const messageElement = document.createElement("div");
         messageElement.classList.add("message", `${sender}-message`);
@@ -258,7 +234,6 @@ document.addEventListener("DOMContentLoaded", () => {
         chatBox.scrollTop = chatBox.scrollHeight;
     }
     
-    // --- 麥克風邏輯 ---
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
