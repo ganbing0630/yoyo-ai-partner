@@ -55,7 +55,7 @@ SYSTEM_INSTRUCTION = """
 """
 
 model = genai.GenerativeModel(
-    'gemini-1.5-flash',
+    'gemini-2.5-flash',
     system_instruction=SYSTEM_INSTRUCTION,
 )
 
@@ -113,7 +113,7 @@ def text_to_speech_azure(text_to_speak):
         return None
 
     logging.info(f"正在為文字呼叫 Azure TTS API: '{text_to_speak[:30]}...'")
-    ssml = f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-TW'><voice name='zh-TW-HsiaoChenNeural'>{text_to_speak}</voice></speak>"
+    ssml = f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-TW'><voice name='zh-CN-YunxiNeural'>{text_to_speak}</voice></speak>"
     endpoint = f"https://{speech_region}.tts.speech.microsoft.com/cognitiveservices/v1"
     headers = {
         "Ocp-Apim-Subscription-Key": speech_key, 
