@@ -217,4 +217,4 @@ def api_root_health_check():
     # --- 日誌：用於測試 /api 根路徑是否可達 ---
     logging.info("--- / (GET) route was accessed ---")
     # 把回傳的訊息改成一個全新的、絕對不會搞混的訊息
-    return "VERSION 3 - DEPLOYMENT IS LIVE!"
+    return "Python backend is alive and correctly routed!"
