@@ -11,12 +11,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const cameraInput = document.getElementById("camera-input");
 
     const CHAT_API_URL = "/api/chat";
-    const TTS_API_URL = "/api/tts";
 
     let conversationHistory = [];
     let currentAudio = null;
 
-    // --- 檔案/相機上傳 ---
+    // --- 檔案/相機上傳 (不變) ---
     cameraBtn.addEventListener('click', () => cameraInput.click());
     uploadBtn.addEventListener('click', () => fileInput.click());
     
@@ -37,7 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
     fileInput.addEventListener('change', handleFileSelection);
     cameraInput.addEventListener('change', handleFileSelection);
 
-    // --- 音訊播放邏輯 ---
+    // --- 音訊播放邏輯 (不變) ---
     const playAudio = (base64Audio) => {
         if (!base64Audio) {
             toggleSpeechBtn.style.display = 'none';
@@ -68,29 +67,7 @@ document.addEventListener("DOMContentLoaded", () => {
         else currentAudio.play();
     });
 
-    // --- 獨立語音合成函式 ---
-    async function fetchAndPlayAudio(segments) {
-        if (!segments || segments.length === 0) return;
-        try {
-            const response = await fetch(TTS_API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ segments: segments })
-            });
-            if (!response.ok) {
-                console.error(`語音合成 API 錯誤: ${response.status}`);
-                return;
-            }
-            const data = await response.json();
-            if (data.audio_content) {
-                playAudio(data.audio_content);
-            }
-        } catch (error) {
-            console.error("呼叫語音合成 API 時失敗:", error);
-        }
-    }
-
-    // --- 主要訊息發送函式 (支援混合串流) ---
+    // --- 簡化後的訊息發送函式 ---
     const sendMessage = async (message, imageBase64 = null) => {
         if (!message && !imageBase64) return;
         
@@ -126,7 +103,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
-            const SEPARATOR = "---YOYO_SSML_SEPARATOR---";
+            const SEPARATOR = "---YOYO_AUDIO_SEPARATOR---";
             let buffer = "";
 
             while (true) {
@@ -134,22 +111,21 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (done) break;
                 
                 buffer += decoder.decode(value, { stream: true });
+                const separatorIndex = buffer.indexOf(SEPARATOR);
 
-                if (buffer.includes(SEPARATOR)) {
-                    const parts = buffer.split(SEPARATOR);
-                    p.textContent += parts[0]; // 顯示分隔符前的最後文字
+                if (separatorIndex !== -1) {
+                    const textPart = buffer.substring(0, separatorIndex);
+                    const audioPart = buffer.substring(separatorIndex + SEPARATOR.length);
                     
-                    const jsonPart = parts[1];
-                    if (jsonPart) {
-                        const segments = JSON.parse(jsonPart);
-                        conversationHistory.push({ role: 'model', parts: [p.textContent] });
-                        await fetchAndPlayAudio(segments);
-                    }
-                    break; // 處理完畢，跳出迴圈
+                    p.textContent = textPart; // 顯示最終文字
+                    
+                    conversationHistory.push({ role: 'model', parts: [p.textContent] });
+                    playAudio(audioPart); // 直接播放音訊
+                    
+                    break; // 處理完畢
                 }
                 
-                // 持續更新文字，但不處理分隔符
-                p.textContent = buffer;
+                p.textContent = buffer; // 持續更新文字
                 chatBox.scrollTop = chatBox.scrollHeight;
             }
             
@@ -168,14 +144,15 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
-    // --- 提交表單邏輯 ---
+    // --- 提交表單邏輯 (不變) ---
     chatForm.addEventListener("submit", (e) => {
         e.preventDefault();
         sendMessage(userInput.value.trim());
     });
 
-    // --- UI 輔助函式 ---
+    // --- UI 輔助函式 (不變) ---
     function createMessageElement(sender, messageText = "", imageBase64 = null) {
+        // ... (這個函式不需要任何修改) ...
         const messageElement = document.createElement("div");
         messageElement.classList.add("message", `${sender}-message`);
         if (sender === 'ai') {
@@ -204,14 +181,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function addMessageToChatBox(message, sender, imageBase64 = null) {
+        // ... (這個函式不需要任何修改) ...
         const messageElement = createMessageElement(sender, message, imageBase64);
         chatBox.appendChild(messageElement);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
     
-    // --- 麥克風邏輯 ---
+    // --- 麥克風邏輯 (不變) ---
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
+        // ... (這個區塊不需要任何修改) ...
         const recognition = new SpeechRecognition();
         recognition.lang = 'zh-TW';
         recognition.continuous = false;
