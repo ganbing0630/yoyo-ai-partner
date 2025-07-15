@@ -150,7 +150,7 @@ def text_to_speech_azure_batch(segments):
         return None
 
 # --- API Endpoint ---
-@app.route('/', methods=['POST'])
+@app.route('/api/chat', methods=['POST'])
 def chat():
     # --- 日誌：這是最重要的日誌！如果我們看不到它，代表請求從未到達這裡 ---
     logging.critical("--- /chat ROUTE FUNCTION STARTED ---")
@@ -212,7 +212,7 @@ def chat():
         logging.critical(f"--- UNHANDLED EXCEPTION IN /chat ROUTE: {e} ---", exc_info=True)
         return jsonify({"error": "伺服器內部發生未知錯誤"}), 500
 
-@app.route('/', methods=['GET'])
+@app.route('/api/chat', methods=['GET'])
 def api_root_health_check():
     # --- 日誌：用於測試 /api 根路徑是否可達 ---
     logging.info("--- / (GET) route was accessed ---")

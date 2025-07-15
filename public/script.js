@@ -12,7 +12,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const fileInput = document.getElementById("file-input");
     const cameraInput = document.getElementById("camera-input");
 
-    const API_URL = "/api/chat";; 
+    const API_URL = "/api/chat";;
 
     let conversationHistory = [];
     let currentAudio = null;
