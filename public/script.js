@@ -1,7 +1,5 @@
-// script.js (Vercel 適配 + 模擬串流動畫版)
-
 document.addEventListener("DOMContentLoaded", () => {
-    // --- 變數定義 (不變) ---
+    // --- 變數定義 ---
     const chatForm = document.getElementById("chat-form");
     const userInput = document.getElementById("user-input");
     const chatBox = document.getElementById("chat-box");
@@ -12,14 +10,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const fileInput = document.getElementById("file-input");
     const cameraInput = document.getElementById("camera-input");
 
-    // 後端 API 端點
     const CHAT_API_URL = "/api/chat";
     const TTS_API_URL = "/api/tts";
 
     let conversationHistory = [];
     let currentAudio = null;
 
-    // --- 檔案/相機上傳 (不變) ---
+    // --- 檔案/相機上傳 ---
     cameraBtn.addEventListener('click', () => cameraInput.click());
     uploadBtn.addEventListener('click', () => fileInput.click());
     
@@ -29,9 +26,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (file.type.startsWith('image/')) {
             const reader = new FileReader();
             reader.onload = (e) => {
-                const imageBase64 = e.target.result;
-                const messageText = userInput.value.trim();
-                sendMessage(messageText, imageBase64);
+                sendMessage(userInput.value.trim(), e.target.result);
             };
             reader.readAsDataURL(file);
         } else {
@@ -39,11 +34,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         event.target.value = '';
     };
-
     fileInput.addEventListener('change', handleFileSelection);
     cameraInput.addEventListener('change', handleFileSelection);
 
-    // --- 音訊播放邏輯 (不變) ---
+    // --- 音訊播放邏輯 ---
     const playAudio = (base64Audio) => {
         if (!base64Audio) {
             toggleSpeechBtn.style.display = 'none';
@@ -74,34 +68,29 @@ document.addEventListener("DOMContentLoaded", () => {
         else currentAudio.play();
     });
 
-    // --- NEW: 新增的獨立語音合成函式 ---
-    async function fetchAndPlayAudio(text) {
-        if (!text) return;
-    
+    // --- 獨立語音合成函式 ---
+    async function fetchAndPlayAudio(segments) {
+        if (!segments || segments.length === 0) return;
         try {
             const response = await fetch(TTS_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: text })
+                body: JSON.stringify({ segments: segments })
             });
-    
             if (!response.ok) {
                 console.error(`語音合成 API 錯誤: ${response.status}`);
                 return;
             }
-    
             const data = await response.json();
             if (data.audio_content) {
                 playAudio(data.audio_content);
             }
-    
         } catch (error) {
             console.error("呼叫語音合成 API 時失敗:", error);
         }
     }
 
-
-    // --- MODIFIED: 完全重寫的 sendMessage 函式，以支援文字串流 ---
+    // --- 主要訊息發送函式 (支援混合串流) ---
     const sendMessage = async (message, imageBase64 = null) => {
         if (!message && !imageBase64) return;
         
@@ -119,12 +108,10 @@ document.addEventListener("DOMContentLoaded", () => {
         
         if(currentAudio) currentAudio.pause();
 
-        // 1. 立即建立 AI 的訊息框，準備接收串流內容
         const aiMessageElement = createMessageElement("ai");
         const p = aiMessageElement.querySelector('p');
         chatBox.appendChild(aiMessageElement);
-        chatBox.scrollTop = chatBox.scrollHeight;
-        p.classList.add('typing-cursor'); // 立即顯示打字游標
+        p.classList.add('typing-cursor');
 
         try {
             const response = await fetch(CHAT_API_URL, {
@@ -137,64 +124,69 @@ document.addEventListener("DOMContentLoaded", () => {
                 throw new Error(`伺服器回應錯誤 ${response.status}`);
             }
 
-            // 2. 準備讀取和解碼串流
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
-            let fullReply = "";
+            const SEPARATOR = "---YOYO_SSML_SEPARATOR---";
+            let buffer = "";
 
-            // 3. 使用 while 迴圈持續讀取和顯示文字
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) {
-                    break; // 串流結束
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+
+                if (buffer.includes(SEPARATOR)) {
+                    const parts = buffer.split(SEPARATOR);
+                    p.textContent += parts[0]; // 顯示分隔符前的最後文字
+                    
+                    const jsonPart = parts[1];
+                    if (jsonPart) {
+                        const segments = JSON.parse(jsonPart);
+                        conversationHistory.push({ role: 'model', parts: [p.textContent] });
+                        await fetchAndPlayAudio(segments);
+                    }
+                    break; // 處理完畢，跳出迴圈
                 }
-                const chunk = decoder.decode(value, { stream: true });
-                fullReply += chunk;
-                p.textContent = fullReply; // 即時更新文字內容
-                chatBox.scrollTop = chatBox.scrollHeight; // 保持滾動到底部
+                
+                // 持續更新文字，但不處理分隔符
+                p.textContent = buffer;
+                chatBox.scrollTop = chatBox.scrollHeight;
             }
             
-            p.classList.remove('typing-cursor'); // 所有文字顯示完畢，移除游標
-
-            // 將完整的 AI 回應加入歷史紀錄
-            conversationHistory.push({ role: 'model', parts: [fullReply] });
-
-            // 4. 當文字串流完全結束後，用收集到的完整文字去請求語音
-            if (fullReply) {
-                await fetchAndPlayAudio(fullReply);
-            }
+            p.classList.remove('typing-cursor');
 
         } catch (error) {
             p.classList.remove('typing-cursor');
             p.textContent = `糟糕，祐祐好像斷線了 (${error.message})`;
             console.error("捕獲到一個錯誤:", error);
-            conversationHistory.pop(); // 移除失敗的使用者輸入
+            if (conversationHistory[conversationHistory.length - 1].role === 'user') {
+                 conversationHistory.pop();
+            }
         } finally {
             userInput.disabled = false;
             userInput.focus();
         }
     };
 
-
-    // --- 提交表單邏輯 (不變) ---
+    // --- 提交表單邏輯 ---
     chatForm.addEventListener("submit", (e) => {
         e.preventDefault();
-        const userMessage = userInput.value.trim();
-        if (userMessage) sendMessage(userMessage);
+        sendMessage(userInput.value.trim());
     });
 
-    // --- UI 輔助函式 (不變) ---
+    // --- UI 輔助函式 ---
     function createMessageElement(sender, messageText = "", imageBase64 = null) {
         const messageElement = document.createElement("div");
         messageElement.classList.add("message", `${sender}-message`);
         if (sender === 'ai') {
             const avatar = document.createElement("img");
-            avatar.src = "yoyo-avatar.png"; avatar.alt = "ai-avatar"; avatar.className = "avatar";
+            avatar.src = "/yoyo-avatar.png"; 
+            avatar.alt = "ai-avatar";
+            avatar.className = "avatar";
             messageElement.appendChild(avatar);
         }
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
-        // AI訊息即使為空也要創建p標籤，以便之後填入串流內容
         if (messageText || sender === 'ai') { 
             const p = document.createElement("p");
             p.textContent = messageText;
@@ -202,7 +194,8 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         if (imageBase64 && sender === 'user') {
             const img = document.createElement('img');
-            img.src = imageBase64; img.alt = "uploaded-image";
+            img.src = imageBase64;
+            img.alt = "uploaded-image";
             img.onclick = () => window.open(imageBase64);
             contentDiv.appendChild(img);
         }
@@ -216,7 +209,7 @@ document.addEventListener("DOMContentLoaded", () => {
         chatBox.scrollTop = chatBox.scrollHeight;
     }
     
-    // --- 麥克風邏輯 (不變) ---
+    // --- 麥克風邏輯 ---
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
