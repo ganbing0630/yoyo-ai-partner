@@ -1,5 +1,5 @@
 document.addEventListener("DOMContentLoaded", () => {
-    // --- 變數定義 ---
+    // --- 變數定義 (不變) ---
     const chatForm = document.getElementById("chat-form");
     const userInput = document.getElementById("user-input");
     const chatBox = document.getElementById("chat-box");
@@ -67,7 +67,7 @@ document.addEventListener("DOMContentLoaded", () => {
         else currentAudio.play();
     });
 
-    // --- 簡化後的訊息發送函式 ---
+    // --- 修正後的訊息發送函式 ---
     const sendMessage = async (message, imageBase64 = null) => {
         if (!message && !imageBase64) return;
         
@@ -106,27 +106,41 @@ document.addEventListener("DOMContentLoaded", () => {
             const SEPARATOR = "---YOYO_AUDIO_SEPARATOR---";
             let buffer = "";
 
+            // --- 核心修正：重寫串流處理迴圈 ---
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                
+                if (done) {
+                    // 如果串流意外結束，但緩衝區仍有內容，則將其顯示
+                    p.textContent = buffer;
+                    break;
+                }
                 
                 buffer += decoder.decode(value, { stream: true });
                 const separatorIndex = buffer.indexOf(SEPARATOR);
 
                 if (separatorIndex !== -1) {
+                    // 找到了分隔符！代表文字串流結束了。
                     const textPart = buffer.substring(0, separatorIndex);
                     const audioPart = buffer.substring(separatorIndex + SEPARATOR.length);
                     
-                    p.textContent = textPart; // 顯示最終文字
+                    // 1. 顯示最終的、完整的文字
+                    p.textContent = textPart;
                     
+                    // 2. 將完整的文字回應加入歷史紀錄
                     conversationHistory.push({ role: 'model', parts: [p.textContent] });
-                    playAudio(audioPart); // 直接播放音訊
+
+                    // 3. 播放音訊
+                    playAudio(audioPart); 
                     
-                    break; // 處理完畢
+                    // 4. 任務完成，跳出迴圈
+                    break; 
+                } else {
+                    // 如果還沒找到分隔符，代表所有內容都是文字
+                    // 持續更新畫面，這會產生流式輸出的效果
+                    p.textContent = buffer;
+                    chatBox.scrollTop = chatBox.scrollHeight;
                 }
-                
-                p.textContent = buffer; // 持續更新文字
-                chatBox.scrollTop = chatBox.scrollHeight;
             }
             
             p.classList.remove('typing-cursor');
@@ -135,7 +149,8 @@ document.addEventListener("DOMContentLoaded", () => {
             p.classList.remove('typing-cursor');
             p.textContent = `糟糕，祐祐好像斷線了 (${error.message})`;
             console.error("捕獲到一個錯誤:", error);
-            if (conversationHistory[conversationHistory.length - 1].role === 'user') {
+            // 如果請求失敗，從歷史紀錄中移除剛才送出的那句話
+            if (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === 'user') {
                  conversationHistory.pop();
             }
         } finally {
@@ -152,7 +167,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- UI 輔助函式 (不變) ---
     function createMessageElement(sender, messageText = "", imageBase64 = null) {
-        // ... (這個函式不需要任何修改) ...
         const messageElement = document.createElement("div");
         messageElement.classList.add("message", `${sender}-message`);
         if (sender === 'ai') {
@@ -181,7 +195,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function addMessageToChatBox(message, sender, imageBase64 = null) {
-        // ... (這個函式不需要任何修改) ...
         const messageElement = createMessageElement(sender, message, imageBase64);
         chatBox.appendChild(messageElement);
         chatBox.scrollTop = chatBox.scrollHeight;
@@ -190,7 +203,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- 麥克風邏輯 (不變) ---
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
-        // ... (這個區塊不需要任何修改) ...
         const recognition = new SpeechRecognition();
         recognition.lang = 'zh-TW';
         recognition.continuous = false;
