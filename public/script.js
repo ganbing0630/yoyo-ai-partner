@@ -11,7 +11,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const fileInput = document.getElementById("file-input");
     const cameraInput = document.getElementById("camera-input");
 
-    const CHAT_API_URL = "/api/chat";
+    const CHAT_API_URL = "https://yoyo-ai-partner.onrender.com/api/chat";
 
     let conversationHistory = [];
     let currentAudio = null;
