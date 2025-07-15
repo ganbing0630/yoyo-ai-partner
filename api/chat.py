@@ -6,7 +6,7 @@ import re
 import json
 import logging
 import requests  # <-- 新增：使用 requests 函式庫
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -151,22 +151,17 @@ def text_to_speech_azure_batch(segments):
 
 # --- API Endpoint ---
 @app.route('/api/chat', methods=['POST'])
-def chat():
-    # --- 日誌：這是最重要的日誌！如果我們看不到它，代表請求從未到達這裡 ---
-    logging.critical("--- /chat ROUTE FUNCTION STARTED ---")
+def chat_stream(): # 為了清晰，可以將函式改名
+    # --- 日誌 ---
+    logging.critical("--- /api/chat STREAMING FUNCTION STARTED ---")
     
     try:
-        # --- 日誌：查看收到的原始數據 ---
-        raw_data = request.data
-        logging.info(f"Received raw data: {raw_data[:200]}...") # 只顯示前200個字元以防過長
-        
         data = request.json
         history = data.get("history", [])
         if not history:
             logging.error("Request rejected: history is empty.")
             return jsonify({"error": "歷史紀錄不可為空"}), 400
 
-        # --- 日誌：顯示正在處理的對話歷史長度 ---
         logging.info(f"Processing history with {len(history)} entries.")
         
         gemini_history = process_history_for_gemini(history[:-1])
@@ -174,43 +169,42 @@ def chat():
 
         chat_session = model.start_chat(history=gemini_history)
         
-        # --- 日誌：即將發送請求給 Gemini ---
-        logging.info("Sending message to Gemini...")
-        response = chat_session.send_message(latest_message_parts)
-        logging.info("Received response from Gemini.")
-
-        ai_segments = []
-        text_for_display = ""
-        try:
-            clean_text = re.sub(r'^```json\s*|\s*```$', '', response.text.strip())
-            response_data = json.loads(clean_text)
-            if isinstance(response_data, list) and response_data:
-                ai_segments = response_data
-                text_for_display = " ".join([seg.get("text", "") for seg in ai_segments])
-            else:
-                raise ValueError("回應不是一個列表")
-        except (json.JSONDecodeError, ValueError) as e:
-            logging.warning(f"JSON 解析失敗: {e}. 將使用原始文字。")
-            text_for_display = response.text
-            ai_segments = [{"style": "default", "degree": 1.0, "rate": "0%", "pitch":"0%", "text": text_for_display}]
-
-        # --- 日誌：準備進行語音合成 ---
-        logging.info("Starting text-to-speech synthesis...")
-        audio_content_base64 = text_to_speech_azure_batch(ai_segments)
-        logging.info("Finished text-to-speech synthesis.")
+        logging.info("Sending message to Gemini with stream=True...")
         
-        # --- 日誌：準備回傳最終結果 ---
-        logging.critical("--- /chat ROUTE FUNCTION COMPLETED SUCCESSFULLY ---")
-        return jsonify({
-            "reply": text_for_display,
-            "audio_content": audio_content_base64,
-            "segments": ai_segments
-        })
+        # 2. 核心修改：加入 stream=True
+        response_stream = chat_session.send_message(
+            latest_message_parts,
+            stream=True
+        )
+
+        # 3. 核心修改：定義一個 generator 函式來處理串流
+        def generate_text():
+            full_text_for_tts = [] # 用來收集完整的文字，以便之後合成語音
+            try:
+                for chunk in response_stream:
+                    if chunk.text:
+                        # yield 出文字片段，供前端即時顯示
+                        yield chunk.text
+                        full_text_for_tts.append(chunk.text)
+                
+                # --- 文字串流結束後，我們現在擁有了完整的文字 ---
+                logging.info("Streaming finished. Starting text-to-speech synthesis.")
+                final_text = "".join(full_text_for_tts)
+                
+                # 這裡的邏輯需要調整：因為我們不能在串流文字的同時又在結尾回傳JSON
+                # 最好的方法是讓前端在串流結束後，用完整的文字再發起一次語音合成請求
+                # 但為了簡化，我們先只完成文字串流部分
+
+            except Exception as e:
+                logging.error(f"Error during streaming: {e}")
+                yield "糟糕，處理過程中發生錯誤。"
+
+        # 4. 核心修改：回傳一個串流 Response
+        return Response(stream_with_context(generate_text()), mimetype='text/plain')
 
     except Exception as e:
-        # --- 日誌：捕獲到未知錯誤 ---
-        logging.critical(f"--- UNHANDLED EXCEPTION IN /chat ROUTE: {e} ---", exc_info=True)
-        return jsonify({"error": "伺服器內部發生未知錯誤"}), 500
+        logging.critical(f"--- UNHANDLED EXCEPTION IN /api/chat ROUTE: {e} ---", exc_info=True)
+        return Response("伺服器內部發生未知錯誤", status=500)
 
 @app.route('/api/chat', methods=['GET'])
 def api_root_health_check():
@@ -218,3 +212,46 @@ def api_root_health_check():
     logging.info("--- / (GET) route was accessed ---")
     # 把回傳的訊息改成一個全新的、絕對不會搞混的訊息
     return "Python backend is alive and correctly routed!"
+
+@app.route('/api/tts', methods=['POST'])
+def text_to_speech_endpoint():
+    """
+    專門用於語音合成的端點。
+    接收一個包含 'text' 欄位的 JSON，回傳包含音訊 Base64 的 JSON。
+    """
+    logging.info("--- /api/tts ENDPOINT STARTED ---")
+    
+    data = request.json
+    text_to_synthesize = data.get('text')
+
+    if not text_to_synthesize:
+        logging.error("TTS request rejected: text is empty.")
+        return jsonify({"error": "文字不可為空"}), 400
+
+    # 為了讓 text_to_speech_azure_batch 函式能夠運作，
+    # 我們需要將純文字包裝成它期望的 segments 格式。
+    # 這裡我們使用最簡單的中性風格。
+    # 您也可以讓前端傳來更複雜的 segments 結構。
+    simple_segments = [
+        {
+            "style": "default",
+            "degree": 1.0,
+            "rate": "0%",
+            "pitch": "0%",
+            "text": text_to_synthesize
+        }
+    ]
+
+    try:
+        audio_content_base64 = text_to_speech_azure_batch(simple_segments)
+        
+        if audio_content_base64:
+            logging.info("TTS synthesis successful.")
+            return jsonify({"audio_content": audio_content_base64})
+        else:
+            logging.error("TTS synthesis failed, no audio content generated.")
+            return jsonify({"error": "語音合成失敗"}), 500
+
+    except Exception as e:
+        logging.critical(f"--- UNHANDLED EXCEPTION IN /api/tts: {e} ---", exc_info=True)
+        return jsonify({"error": "語音合成時發生伺服器內部錯誤"}), 500

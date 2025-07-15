@@ -12,7 +12,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const fileInput = document.getElementById("file-input");
     const cameraInput = document.getElementById("camera-input");
 
-    const API_URL = "/api/chat";;
+    // 後端 API 端點
+    const CHAT_API_URL = "/api/chat";
+    const TTS_API_URL = "/api/tts";
 
     let conversationHistory = [];
     let currentAudio = null;
@@ -40,52 +42,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     fileInput.addEventListener('change', handleFileSelection);
     cameraInput.addEventListener('change', handleFileSelection);
-
-    // --- MODIFIED: 修改 typeWriter 以接受 callback ---
-    function typeWriter(element, text, callback) {
-        let i = 0;
-        const speed = 50; // 打字速度 (ms)
-        
-        function type() {
-            if (i < text.length) {
-                element.textContent += text.charAt(i);
-                i++;
-                chatBox.scrollTop = chatBox.scrollHeight;
-                setTimeout(type, speed);
-            } else {
-                if (callback) callback(); // 完成後調用回呼函式
-            }
-        }
-        type();
-    }
-
-    // --- NEW: 新增回應動畫的總指揮函式 ---
-    async function animateResponse(segments, audioContent) {
-        // 1. 創建一個空的 AI 訊息框
-        const aiMessageElement = createMessageElement("ai");
-        const p = aiMessageElement.querySelector('p');
-        chatBox.appendChild(aiMessageElement);
-        p.classList.add('typing-cursor'); // 立即顯示游標
-
-        // 2. 開始播放完整的音訊
-        playAudio(audioContent);
-
-        // 3. 使用 async/await 依序為每個片段播放打字動畫
-        for (const segment of segments) {
-            // 等待當前片段的打字機效果完成
-            await new Promise(resolve => {
-                typeWriter(p, segment.text + " ", resolve);
-            });
-            // 可以在片段之間加入一個微小的固定延遲，讓節奏更自然
-            // await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        
-        p.classList.remove('typing-cursor'); // 所有動畫完成後，移除游標
-
-        // 4. 動畫全部完成後，才將完整的回應加入歷史紀錄
-        const fullReply = p.textContent.trim();
-        conversationHistory.push({ role: 'model', parts: [fullReply] });
-    }
 
     // --- 音訊播放邏輯 (不變) ---
     const playAudio = (base64Audio) => {
@@ -118,7 +74,34 @@ document.addEventListener("DOMContentLoaded", () => {
         else currentAudio.play();
     });
 
-    // --- MODIFIED: 修改 sendMessage 以調用動畫函式 ---
+    // --- NEW: 新增的獨立語音合成函式 ---
+    async function fetchAndPlayAudio(text) {
+        if (!text) return;
+    
+        try {
+            const response = await fetch(TTS_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text })
+            });
+    
+            if (!response.ok) {
+                console.error(`語音合成 API 錯誤: ${response.status}`);
+                return;
+            }
+    
+            const data = await response.json();
+            if (data.audio_content) {
+                playAudio(data.audio_content);
+            }
+    
+        } catch (error) {
+            console.error("呼叫語音合成 API 時失敗:", error);
+        }
+    }
+
+
+    // --- MODIFIED: 完全重寫的 sendMessage 函式，以支援文字串流 ---
     const sendMessage = async (message, imageBase64 = null) => {
         if (!message && !imageBase64) return;
         
@@ -133,36 +116,59 @@ document.addEventListener("DOMContentLoaded", () => {
             if(match) messageParts.push({ inline_data: { mime_type: match[1], data: match[2] } });
         }
         conversationHistory.push({ role: 'user', parts: messageParts });
-
-        showTypingIndicator();
+        
         if(currentAudio) currentAudio.pause();
 
+        // 1. 立即建立 AI 的訊息框，準備接收串流內容
+        const aiMessageElement = createMessageElement("ai");
+        const p = aiMessageElement.querySelector('p');
+        chatBox.appendChild(aiMessageElement);
+        chatBox.scrollTop = chatBox.scrollHeight;
+        p.classList.add('typing-cursor'); // 立即顯示打字游標
+
         try {
-            const response = await fetch(API_URL, {
+            const response = await fetch(CHAT_API_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ history: conversationHistory }),
             });
 
-            removeTypingIndicator();
-            
-            // --- 日誌：如果回應不成功，先嘗試以文字形式讀取並拋出 ---
             if (!response.ok) {
-                const errorText = await response.text();
-                // 把整個 HTML 頁面或錯誤訊息作為錯誤拋出
-                throw new Error(`伺服器回應錯誤 ${response.status}: ${errorText}`);
+                throw new Error(`伺服器回應錯誤 ${response.status}`);
+            }
+
+            // 2. 準備讀取和解碼串流
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let fullReply = "";
+
+            // 3. 使用 while 迴圈持續讀取和顯示文字
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    break; // 串流結束
+                }
+                const chunk = decoder.decode(value, { stream: true });
+                fullReply += chunk;
+                p.textContent = fullReply; // 即時更新文字內容
+                chatBox.scrollTop = chatBox.scrollHeight; // 保持滾動到底部
             }
             
-            const data = await response.json();
-            
-            await animateResponse(data.segments, data.audio_content);
+            p.classList.remove('typing-cursor'); // 所有文字顯示完畢，移除游標
+
+            // 將完整的 AI 回應加入歷史紀錄
+            conversationHistory.push({ role: 'model', parts: [fullReply] });
+
+            // 4. 當文字串流完全結束後，用收集到的完整文字去請求語音
+            if (fullReply) {
+                await fetchAndPlayAudio(fullReply);
+            }
 
         } catch (error) {
-            // --- 日誌：在瀏覽器控制台中印出我們捕獲到的、更詳細的錯誤 ---
+            p.classList.remove('typing-cursor');
+            p.textContent = `糟糕，祐祐好像斷線了 (${error.message})`;
             console.error("捕獲到一個錯誤:", error);
-            removeTypingIndicator();
-            addMessageToChatBox(`糟糕，祐祐好像斷線了 (${error.message})`, "ai");
-            conversationHistory.pop();
+            conversationHistory.pop(); // 移除失敗的使用者輸入
         } finally {
             userInput.disabled = false;
             userInput.focus();
@@ -188,7 +194,8 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
-        if (messageText || sender === 'ai') { // AI訊息即使為空也要創建p標籤
+        // AI訊息即使為空也要創建p標籤，以便之後填入串流內容
+        if (messageText || sender === 'ai') { 
             const p = document.createElement("p");
             p.textContent = messageText;
             contentDiv.appendChild(p);
@@ -207,22 +214,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const messageElement = createMessageElement(sender, message, imageBase64);
         chatBox.appendChild(messageElement);
         chatBox.scrollTop = chatBox.scrollHeight;
-    }
-
-    function showTypingIndicator() {
-        if (document.getElementById("typing-indicator")) return;
-        const typingElement = createMessageElement("ai");
-        typingElement.id = "typing-indicator";
-        typingElement.classList.add('typing-indicator');
-        const p = typingElement.querySelector('p');
-        p.textContent = "祐祐思考中";
-        chatBox.appendChild(typingElement);
-        chatBox.scrollTop = chatBox.scrollHeight;
-    }
-
-    function removeTypingIndicator() {
-        const typingElement = document.getElementById("typing-indicator");
-        if (typingElement) typingElement.remove();
     }
     
     // --- 麥克風邏輯 (不變) ---
