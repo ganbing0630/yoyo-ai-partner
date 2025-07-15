@@ -1,3 +1,4 @@
+// script.js (已修正)
 document.addEventListener("DOMContentLoaded", () => {
     // --- 變數定義 ---
     const chatForm = document.getElementById("chat-form");
