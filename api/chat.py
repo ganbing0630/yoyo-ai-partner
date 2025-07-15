@@ -4,8 +4,8 @@ import re
 import json
 import logging
 import requests
-import pickle  # 用於序列化/反序列化對話物件
-import redis   # 引入 Redis
+import pickle
+import redis
 
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
@@ -21,7 +21,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-
 # --- Render Redis 連線設定 ---
 redis_client = None
 redis_url = os.getenv('REDIS_URL')
@@ -35,7 +34,6 @@ if redis_url:
         redis_client = None
 else:
     logging.warning("未找到 REDIS_URL 環境變數，使用者記憶功能將是暫時性的。")
-
 
 # --- Gemini API 設定 ---
 gemini_api_key = os.getenv("GEMINI_API_KEY")
@@ -57,7 +55,7 @@ SYSTEM_INSTRUCTION = """
 """
 
 model = genai.GenerativeModel(
-    'gemini-2.5-flash',
+    'gemini-1.5-flash',
     system_instruction=SYSTEM_INSTRUCTION,
 )
 
@@ -67,19 +65,18 @@ speech_region = os.getenv("SPEECH_REGION")
 if not (speech_key and speech_region):
     logging.warning("SPEECH_KEY 或 SPEECH_REGION 未設定，語音合成功能將被禁用。")
 
-
 # --- 輔助函式：移除表情符號 ---
 def remove_emojis(text):
     emoji_pattern = re.compile("["
-        u"\U0001F600-\U0001F64F"
-        u"\U0001F300-\U0001F5FF"
-        u"\U0001F680-\U0001F6FF"
-        u"\U0001F1E0-\U0001F1FF"
+        u"\U0001F600-\U0001F64F"  # emoticons
+        u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+        u"\U0001F680-\U0001F6FF"  # transport & map symbols
+        u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
         u"\U00002702-\U000027B0"
         u"\U000024C2-\U0001F251"
+        u"\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
         "]+", flags=re.UNICODE)
     return emoji_pattern.sub(r'', text).strip()
-
 
 # --- 輔助函式：處理前端傳來的歷史紀錄 ---
 def process_history_for_gemini(history):
@@ -103,18 +100,19 @@ def process_history_for_gemini(history):
              processed_history.append({'role': message['role'], 'parts': new_parts})
     return processed_history
 
-
 # --- 語音合成函式 ---
-def text_to_speech_azure(text):
+def text_to_speech_azure(text_to_speak):
     if not (speech_key and speech_region):
         logging.warning("Azure Speech 未設定，跳過語音合成。")
         return None
     
-    clean_text = remove_emojis(text)
-    if not clean_text: return None
+    # 傳入的文字應該已經被清理過，這裡做最後的防線
+    if not text_to_speak:
+        logging.warning("沒有可供語音合成的有效文字。")
+        return None
 
-    logging.info(f"正在為文字呼叫 Azure TTS API: '{clean_text[:30]}...'")
-    ssml = f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-TW'><voice name='zh-CN-YunxiNeural'>{clean_text}</voice></speak>"
+    logging.info(f"正在為文字呼叫 Azure TTS API: '{text_to_speak[:30]}...'")
+    ssml = f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='zh-TW'><voice name='zh-TW-HsiaoChenNeural'>{text_to_speak}</voice></speak>"
     endpoint = f"https://{speech_region}.tts.speech.microsoft.com/cognitiveservices/v1"
     headers = {
         "Ocp-Apim-Subscription-Key": speech_key, 
@@ -125,12 +123,16 @@ def text_to_speech_azure(text):
     try:
         response = requests.post(endpoint, data=ssml.encode('utf-8'), headers=headers)
         response.raise_for_status()
-        logging.info("Azure TTS API 成功回應。")
-        return base64.b64encode(response.content).decode('utf-8')
+        # 增加一個檢查，確保我們有收到有效的音訊資料
+        if response.content and len(response.content) > 100: # 100 bytes 作為一個合理的最小 MP3 檔案大小
+            logging.info("Azure TTS API 成功回應並收到有效的音訊資料。")
+            return base64.b64encode(response.content).decode('utf-8')
+        else:
+            logging.warning("Azure TTS API 回應成功，但音訊內容為空或無效。")
+            return None
     except requests.exceptions.RequestException as e:
         logging.error(f"呼叫 Azure TTS API 時發生錯誤: {e}")
         return None
-
 
 # --- 主要 API 端點 ---
 @app.route('/api/chat', methods=['POST'])
@@ -146,21 +148,15 @@ def chat():
         logging.info(f"收到來自 User ID: {user_id} 的請求")
         
         gemini_history_for_chat = []
-        # === 核心修正 1: 讀取 Redis ===
         if redis_client:
             try:
                 pickled_history = redis_client.get(user_id)
                 if pickled_history:
-                    # 我們只讀取 history list，而不是整個 chat_session 物件
                     gemini_history_for_chat = pickle.loads(pickled_history)
                     logging.info(f"為 User ID: {user_id} 從 Redis 載入對話歷史。")
-                else:
-                    logging.info(f"Redis 中無 User ID: {user_id} 的歷史，建立新的對話。")
             except Exception as e:
-                logging.error(f"從 Redis 讀取 history 失敗: {e}, 將建立新的對話。")
+                logging.error(f"從 Redis 讀取 history 失敗: {e}")
         
-        # 即使 Redis 有歷史，我們也只用它來初始化。前端傳來的完整歷史仍是主要依據。
-        # Gemini Python SDK 的 chat.history 是 append-only, 直接用前端傳來的最準確
         gemini_history_for_chat = process_history_for_gemini(history[:-1])
         chat_session = model.start_chat(history=gemini_history_for_chat)
 
@@ -178,21 +174,24 @@ def chat():
                     full_text_list.append(chunk.text)
             
             final_text = "".join(full_text_list)
-            logging.info(f"User ID: {user_id} 的回應文字已生成。")
+            logging.info(f"User ID: {user_id} 的回應文字已生成: '{final_text[:50]}...'")
 
-            # === 核心修正 2: 儲存至 Redis ===
             if redis_client:
                 try:
-                    # 我們只儲存 chat_session.history 這個 list，而不是整個物件
                     pickled_history_to_save = pickle.dumps(chat_session.history)
                     redis_client.set(user_id, pickled_history_to_save, ex=86400)
                     logging.info(f"已將 User ID: {user_id} 的對話歷史更新至 Redis。")
                 except Exception as e:
-                    # 這裡的錯誤現在不應再發生
                     logging.error(f"儲存 history 至 Redis 失敗: {e}")
+            
+            # === 核心修正點 ===
+            # 1. 在呼叫語音合成之前，先清理文字
+            text_for_speech = remove_emojis(final_text)
+            # 2. 增加日誌，確認清理後的結果
+            logging.info(f"清理後準備合成語音的文字: '{text_for_speech[:50]}...'")
 
-            # 現在程式可以順利執行到這裡了
-            audio_base64 = text_to_speech_azure(final_text)
+            # 3. 使用清理後的文字進行語音合成
+            audio_base64 = text_to_speech_azure(text_for_speech)
             if audio_base64:
                 yield SEPARATOR
                 yield audio_base64
