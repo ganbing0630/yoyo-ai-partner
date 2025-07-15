@@ -106,41 +106,37 @@ document.addEventListener("DOMContentLoaded", () => {
             const SEPARATOR = "---YOYO_AUDIO_SEPARATOR---";
             let buffer = "";
 
-            // --- 核心修正：重寫串流處理迴圈 ---
+            // --- 核心修正：將所有處理邏輯移到迴圈外部 ---
+            
+            // 步驟 1: 持續讀取和渲染文字，直到串流結束
             while (true) {
                 const { done, value } = await reader.read();
-                
-                if (done) {
-                    // 如果串流意外結束，但緩衝區仍有內容，則將其顯示
-                    p.textContent = buffer;
-                    break;
-                }
+                if (done) break;
                 
                 buffer += decoder.decode(value, { stream: true });
-                const separatorIndex = buffer.indexOf(SEPARATOR);
+                // 為了視覺效果，我們可以持續更新畫面，即使這不是最終文字
+                p.textContent = buffer.split(SEPARATOR)[0];
+                chatBox.scrollTop = chatBox.scrollHeight;
+            }
 
-                if (separatorIndex !== -1) {
-                    // 找到了分隔符！代表文字串流結束了。
-                    const textPart = buffer.substring(0, separatorIndex);
-                    const audioPart = buffer.substring(separatorIndex + SEPARATOR.length);
-                    
-                    // 1. 顯示最終的、完整的文字
-                    p.textContent = textPart;
-                    
-                    // 2. 將完整的文字回應加入歷史紀錄
-                    conversationHistory.push({ role: 'model', parts: [p.textContent] });
+            // 步驟 2: 當迴圈結束後，我們保證 buffer 中有完整的資料
+            const separatorIndex = buffer.indexOf(SEPARATOR);
 
-                    // 3. 播放音訊
-                    playAudio(audioPart); 
-                    
-                    // 4. 任務完成，跳出迴圈
-                    break; 
-                } else {
-                    // 如果還沒找到分隔符，代表所有內容都是文字
-                    // 持續更新畫面，這會產生流式輸出的效果
-                    p.textContent = buffer;
-                    chatBox.scrollTop = chatBox.scrollHeight;
-                }
+            if (separatorIndex !== -1) {
+                const textPart = buffer.substring(0, separatorIndex);
+                const audioPart = buffer.substring(separatorIndex + SEPARATOR.length);
+                
+                // 更新最終、正確的文字
+                p.textContent = textPart;
+                
+                // 將最終的回應加入歷史紀錄
+                conversationHistory.push({ role: 'model', parts: [p.textContent] });
+
+                // 在所有資料都已在本地記憶體中後，才播放音訊
+                playAudio(audioPart);
+            } else {
+                // 如果沒有分隔符，代表可能出錯了，直接顯示所有收到的內容
+                p.textContent = buffer;
             }
             
             p.classList.remove('typing-cursor');
@@ -149,7 +145,6 @@ document.addEventListener("DOMContentLoaded", () => {
             p.classList.remove('typing-cursor');
             p.textContent = `糟糕，祐祐好像斷線了 (${error.message})`;
             console.error("捕獲到一個錯誤:", error);
-            // 如果請求失敗，從歷史紀錄中移除剛才送出的那句話
             if (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === 'user') {
                  conversationHistory.pop();
             }
