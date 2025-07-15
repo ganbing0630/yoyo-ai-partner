@@ -145,20 +145,21 @@ document.addEventListener("DOMContentLoaded", () => {
             });
 
             removeTypingIndicator();
+            
+            // --- 日誌：如果回應不成功，先嘗試以文字形式讀取並拋出 ---
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || `伺服器錯誤: ${response.status}`);
+                const errorText = await response.text();
+                // 把整個 HTML 頁面或錯誤訊息作為錯誤拋出
+                throw new Error(`伺服器回應錯誤 ${response.status}: ${errorText}`);
             }
             
             const data = await response.json();
             
-            // 調用新的動畫函式，而不是直接 addMessageToChatBox 和 playAudio
             await animateResponse(data.segments, data.audio_content);
 
-            // 注意：conversationHistory 的 model 部分已經在 animateResponse 中處理
-
         } catch (error) {
-            console.error("錯誤:", error);
+            // --- 日誌：在瀏覽器控制台中印出我們捕獲到的、更詳細的錯誤 ---
+            console.error("捕獲到一個錯誤:", error);
             removeTypingIndicator();
             addMessageToChatBox(`糟糕，祐祐好像斷線了 (${error.message})`, "ai");
             conversationHistory.pop();
@@ -167,6 +168,7 @@ document.addEventListener("DOMContentLoaded", () => {
             userInput.focus();
         }
     };
+
 
     // --- 提交表單邏輯 (不變) ---
     chatForm.addEventListener("submit", (e) => {

@@ -14,9 +14,9 @@ import google.generativeai as genai
 from PIL import Image
 import io
 
-# --- 基礎設定 ---
 load_dotenv()
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# --- 日誌：設定日誌格式，方便查看 ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - IN_FUNCTION - %(message)s')
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -149,20 +149,35 @@ def text_to_speech_azure_batch(segments):
         logging.error(f"呼叫 Azure TTS API 時發生未預期的錯誤: {e}")
         return None
 
-# --- API Endpoint (保持不變) ---
+# --- API Endpoint ---
 @app.route('/chat', methods=['POST'])
 def chat():
+    # --- 日誌：這是最重要的日誌！如果我們看不到它，代表請求從未到達這裡 ---
+    logging.critical("--- /chat ROUTE FUNCTION STARTED ---")
+    
     try:
+        # --- 日誌：查看收到的原始數據 ---
+        raw_data = request.data
+        logging.info(f"Received raw data: {raw_data[:200]}...") # 只顯示前200個字元以防過長
+        
         data = request.json
         history = data.get("history", [])
         if not history:
+            logging.error("Request rejected: history is empty.")
             return jsonify({"error": "歷史紀錄不可為空"}), 400
 
+        # --- 日誌：顯示正在處理的對話歷史長度 ---
+        logging.info(f"Processing history with {len(history)} entries.")
+        
         gemini_history = process_history_for_gemini(history[:-1])
         latest_message_parts = process_history_for_gemini([history[-1]])[0]['parts']
 
         chat_session = model.start_chat(history=gemini_history)
+        
+        # --- 日誌：即將發送請求給 Gemini ---
+        logging.info("Sending message to Gemini...")
         response = chat_session.send_message(latest_message_parts)
+        logging.info("Received response from Gemini.")
 
         ai_segments = []
         text_for_display = ""
@@ -179,8 +194,13 @@ def chat():
             text_for_display = response.text
             ai_segments = [{"style": "default", "degree": 1.0, "rate": "0%", "pitch":"0%", "text": text_for_display}]
 
+        # --- 日誌：準備進行語音合成 ---
+        logging.info("Starting text-to-speech synthesis...")
         audio_content_base64 = text_to_speech_azure_batch(ai_segments)
-
+        logging.info("Finished text-to-speech synthesis.")
+        
+        # --- 日誌：準備回傳最終結果 ---
+        logging.critical("--- /chat ROUTE FUNCTION COMPLETED SUCCESSFULLY ---")
         return jsonify({
             "reply": text_for_display,
             "audio_content": audio_content_base64,
@@ -188,13 +208,12 @@ def chat():
         })
 
     except Exception as e:
-        logging.error(f"/chat 發生錯誤: {e}", exc_info=True)
-        return jsonify({"error": "伺服器內部發生錯誤"}), 500
+        # --- 日誌：捕獲到未知錯誤 ---
+        logging.critical(f"--- UNHANDLED EXCEPTION IN /chat ROUTE: {e} ---", exc_info=True)
+        return jsonify({"error": "伺服器內部發生未知錯誤"}), 500
 
-# --- 其他路由和啟動設定 (保持不變) ---
-@app.route('/')
-def home():
-    return "祐祐 AI 後端服務已啟動！(v2 - no azure sdk)"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+@app.route('/', methods=['GET'])
+def api_root_health_check():
+    # --- 日誌：用於測試 /api 根路徑是否可達 ---
+    logging.info("--- / (api_root_health_check) route was accessed ---")
+    return "The Yoyo AI API is running correctly."
