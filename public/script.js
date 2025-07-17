@@ -15,8 +15,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- API URL 設定 ---
     // 開發時使用本地 URL
-    const CHAT_API_URL = "http://127.0.0.1:8080/api/chat";
-    const SPEECH_API_URL = "http://127.0.0.1:8080/api/speech";
+    const CHAT_API_URL = "https://yoyo-ai-partner.onrender.com/api/chat";
+    const SPEECH_API_URL = "https://yoyo-ai-partner.onrender.com/api/speech";
     // 部署到 Render 時，請換成下面的 URL
     // const CHAT_API_URL = "https://yoyo-ai-partner.onrender.com/api/chat";
     // const SPEECH_API_URL = "https://yoyo-ai-partner.onrender.com/api/speech";
