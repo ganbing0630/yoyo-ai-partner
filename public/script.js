@@ -1,7 +1,7 @@
-// --- script.js (優化後版本) ---
+// script.js (完整版本)
 
 document.addEventListener("DOMContentLoaded", () => {
-    // --- 變數定義 (無變動) ---
+    // --- 變數定義 ---
     const chatForm = document.getElementById("chat-form");
     const userInput = document.getElementById("user-input");
     const chatBox = document.getElementById("chat-box");
@@ -11,24 +11,32 @@ document.addEventListener("DOMContentLoaded", () => {
     const uploadBtn = document.getElementById("upload-btn");
     const fileInput = document.getElementById("file-input");
     const cameraInput = document.getElementById("camera-input");
+    const gameBtn = document.getElementById("game-btn"); // 猜謎遊戲按鈕
 
-    // === API URL 修改 ===
-    const CHAT_API_URL = "https://yoyo-ai-partner.onrender.com/api/chat";
-    const SPEECH_API_URL = "https://yoyo-ai-partner.onrender.com/api/speech";
+    // --- API URL 設定 ---
+    // 開發時使用本地 URL
+    const CHAT_API_URL = "http://127.0.0.1:8080/api/chat";
+    const SPEECH_API_URL = "http://127.0.0.1:8080/api/speech";
+    // 部署到 Render 時，請換成下面的 URL
+    // const CHAT_API_URL = "https://yoyo-ai-partner.onrender.com/api/chat";
+    // const SPEECH_API_URL = "https://yoyo-ai-partner.onrender.com/api/speech";
 
     let conversationHistory = [];
     let currentAudio = null;
     let userId = null;
     let isSpeechEnabled = true;
 
-    // --- 其他函式 (getOrSetUserId, initializeSpeechSetting, etc. 大致無變動) ---
+    // --- 初始化函式 ---
     function initializeSpeechSetting() {
         const savedPreference = localStorage.getItem('yoyo_speech_enabled');
-        if (savedPreference !== null) { isSpeechEnabled = (savedPreference === 'true'); }
+        if (savedPreference !== null) {
+            isSpeechEnabled = (savedPreference === 'true');
+        }
         updateSpeechButtonUI();
     }
+
     function updateSpeechButtonUI() {
-        toggleSpeechBtn.style.display = 'flex'; 
+        toggleSpeechBtn.style.display = 'flex';
         if (isSpeechEnabled) {
             toggleSpeechBtn.textContent = '🔊';
             toggleSpeechBtn.classList.remove('muted');
@@ -37,124 +45,66 @@ document.addEventListener("DOMContentLoaded", () => {
             toggleSpeechBtn.classList.add('muted');
         }
     }
+
     function getOrSetUserId() {
         let storedId = localStorage.getItem('yoyo_user_id');
-        if (storedId) { userId = storedId; } 
-        else {
+        if (storedId) {
+            userId = storedId;
+        } else {
             userId = 'user_' + Date.now().toString(36) + Math.random().toString(36).substr(2);
             localStorage.setItem('yoyo_user_id', userId);
         }
         console.log("當前使用者 ID:", userId);
     }
-    getOrSetUserId();
-    initializeSpeechSetting();
-    cameraBtn.addEventListener('click', () => cameraInput.click());
-    uploadBtn.addEventListener('click', () => fileInput.click());
-    const handleFileSelection = (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        if (file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = (e) => sendMessage(userInput.value.trim(), e.target.result);
-            reader.readAsDataURL(file);
-        } else { alert(`抱歉，祐祐目前只能看懂圖片檔案喔！`); }
-        event.target.value = '';
-    };
-    fileInput.addEventListener('change', handleFileSelection);
-    cameraInput.addEventListener('change', handleFileSelection);
-    const playAudio = (base64Audio) => {
-        if (!isSpeechEnabled) { console.log("語音已禁用，跳過播放。"); return; }
-        if (!base64Audio) { return; }
-        if (currentAudio) currentAudio.pause();
-        const audioSource = `data:audio/mpeg;base64,${base64Audio}`;
-        currentAudio = new Audio(audioSource);
-        currentAudio.onplaying = () => toggleSpeechBtn.classList.add('speaking');
-        currentAudio.onpause = () => toggleSpeechBtn.classList.remove('speaking');
-        currentAudio.onended = () => {
-            toggleSpeechBtn.classList.remove('speaking');
-            currentAudio = null;
-        };
-        currentAudio.play();
-    };
-    toggleSpeechBtn.addEventListener('click', () => {
-        isSpeechEnabled = !isSpeechEnabled;
-        localStorage.setItem('yoyo_speech_enabled', isSpeechEnabled);
-        updateSpeechButtonUI();
-        if (!isSpeechEnabled && currentAudio) {
-            currentAudio.pause();
-            currentAudio = null; 
-        }
-    });
-    function typewriter(element, text, speed = 30, callback) {
-        let i = 0;
-        element.textContent = "";
-        element.classList.remove('typing-cursor');
-        const interval = setInterval(() => {
-            if (i < text.length) {
-                element.textContent += text.charAt(i);
-                i++;
-                chatBox.scrollTop = chatBox.scrollHeight;
-            } else {
-                clearInterval(interval);
-                if (callback) { callback(); }
-            }
-        }, speed);
+
+    // --- 核心互動函式 ---
+
+    /**
+     * 處理所有發送訊息的請求，將其顯示在畫面上並觸發後端通訊
+     * @param {string} message - 使用者輸入的文字訊息
+     * @param {string|null} imageBase64 - Base64 格式的圖片資料
+     */
+    function handleSendMessage(message, imageBase64 = null) {
+        if (!message && !imageBase64) return;
+
+        addMessageToChatBox(message, "user", imageBase64);
+        sendMessageToBackend(message, imageBase64);
     }
 
-    // === 新增：獨立的語音獲取函式 ===
-    const fetchAndPlayAudio = async (text) => {
-        if (!isSpeechEnabled || !text) {
-            return;
-        }
-        try {
-            console.log("正在請求語音合成...");
-            const response = await fetch(SPEECH_API_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: text }),
-            });
-            if (!response.ok) {
-                throw new Error(`語音伺服器錯誤: ${response.status}`);
-            }
-            const data = await response.json();
-            if (data.audio_base64) {
-                playAudio(data.audio_base64);
-            } else {
-                console.warn("語音合成成功，但未收到音訊資料。");
-            }
-        } catch (error) {
-            console.error("獲取語音失敗:", error);
-        }
-    };
-    
-    // === 核心修改：sendMessage 函式 ===
-    const sendMessage = async (message, imageBase64 = null) => {
-        if (!message && !imageBase64) return;
-        
-        userInput.value = "";
-        userInput.disabled = true;
-        addMessageToChatBox(message, "user", imageBase64);
+    /**
+     * 專門負責與後端 API 通訊的函式
+     * @param {string} message - 文字訊息
+     * @param {string|null} imageBase64 - Base64 圖片
+     */
+    const sendMessageToBackend = async (message, imageBase64 = null) => {
+        userInput.disabled = true; // 禁用輸入框直到收到回應
 
         const messageParts = [];
         if (message) messageParts.push(message);
         if (imageBase64) {
             const match = imageBase64.match(/^data:(image\/\w+);base64,(.*)$/);
-            if(match) messageParts.push({ inline_data: { mime_type: match[1], data: match[2] } });
+            if (match) messageParts.push({ inline_data: { mime_type: match[1], data: match[2] } });
         }
         conversationHistory.push({ role: 'user', parts: messageParts });
-        
-        if(currentAudio) currentAudio.pause();
+
+        if (currentAudio) currentAudio.pause();
 
         const aiMessageElement = createMessageElement("ai");
         const p = aiMessageElement.querySelector('p');
         chatBox.appendChild(aiMessageElement);
+
         p.classList.add('typing-cursor');
+        p.innerHTML = '<span class="thinking-dot">.</span><span class="thinking-dot">.</span><span class="thinking-dot">.</span>';
+        let isFirstChunk = true;
 
         try {
             const response = await fetch(CHAT_API_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ history: conversationHistory, userId: userId }),
+                body: JSON.stringify({
+                    history: conversationHistory,
+                    userId: userId
+                }),
             });
 
             if (!response.ok) throw new Error(`伺服器回應錯誤 ${response.status}`);
@@ -167,51 +117,116 @@ document.addEventListener("DOMContentLoaded", () => {
                 const { done, value } = await reader.read();
                 if (done) break;
                 const chunk = decoder.decode(value, { stream: true });
+
+                if (isFirstChunk && chunk) {
+                    p.textContent = ""; // 清空思考動畫
+                    isFirstChunk = false;
+                }
                 fullText += chunk;
-                // 直接更新文字內容，而不是用打字機效果，這樣最快
-                p.textContent = fullText; 
+                p.textContent = fullText;
                 chatBox.scrollTop = chatBox.scrollHeight;
             }
-            p.classList.remove('typing-cursor'); // 移除閃爍游標
 
-            // 當文字流結束後...
+            if (isFirstChunk) {
+                p.textContent = "嗯...我好像想不到要說什麼耶。";
+            }
+            p.classList.remove('typing-cursor');
+
             conversationHistory.push({ role: 'model', parts: [fullText] });
-            
-            // **關鍵**：在這裡非同步地獲取語音
+
             fetchAndPlayAudio(fullText);
 
-            userInput.disabled = false;
-            userInput.focus();
-            
         } catch (error) {
             p.classList.remove('typing-cursor');
             p.textContent = `糟糕，祐祐好像斷線了 (${error.message})`;
             console.error("捕獲到一個錯誤:", error);
             if (conversationHistory.length > 0 && conversationHistory[conversationHistory.length - 1].role === 'user') {
-                 conversationHistory.pop();
+                conversationHistory.pop();
             }
+        } finally {
             userInput.disabled = false;
             userInput.focus();
-        } 
+        }
     };
 
-    // --- 其他函式 (submit, createMessage, addMessage, SpeechRecognition) 無變動 ---
-    chatForm.addEventListener("submit", (e) => {
-        e.preventDefault();
-        sendMessage(userInput.value.trim());
-    });
+    /**
+     * 獲取並播放語音
+     * @param {string} text - 需要轉換為語音的文字
+     */
+    const fetchAndPlayAudio = async (text) => {
+        if (!isSpeechEnabled || !text) return;
+
+        try {
+            const response = await fetch(SPEECH_API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: text }),
+            });
+            if (!response.ok) throw new Error(`語音伺服器錯誤: ${response.status}`);
+            const data = await response.json();
+            if (data.audio_base64) {
+                playAudio(data.audio_base64);
+            }
+        } catch (error) {
+            console.error("獲取語音失敗:", error);
+        }
+    };
+
+    /**
+     * 播放 Base64 音訊
+     * @param {string} base64Audio - Base64 編碼的音訊
+     */
+    const playAudio = (base64Audio) => {
+        if (!isSpeechEnabled || !base64Audio) return;
+        if (currentAudio) currentAudio.pause();
+
+        const audioSource = `data:audio/mpeg;base64,${base64Audio}`;
+        currentAudio = new Audio(audioSource);
+        currentAudio.onplaying = () => toggleSpeechBtn.classList.add('speaking');
+        currentAudio.onpause = () => toggleSpeechBtn.classList.remove('speaking');
+        currentAudio.onended = () => {
+            toggleSpeechBtn.classList.remove('speaking');
+            currentAudio = null;
+        };
+        currentAudio.play();
+    };
+
+    // --- UI 輔助函式 ---
+
+    /**
+     * 在聊天框中創建並添加一條新訊息
+     * @param {string} message - 文字訊息
+     * @param {string} sender - 'user' 或 'ai'
+     * @param {string|null} imageBase64 - Base64 圖片
+     */
+    function addMessageToChatBox(message, sender, imageBase64 = null) {
+        const messageElement = createMessageElement(sender, message, imageBase64);
+        chatBox.appendChild(messageElement);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    /**
+     * 創建訊息的 HTML 元素
+     * @param {string} sender - 'user' 或 'ai'
+     * @param {string} messageText - 文字訊息
+     * @param {string|null} imageBase64 - Base64 圖片
+     * @returns {HTMLElement}
+     */
     function createMessageElement(sender, messageText = "", imageBase64 = null) {
         const messageElement = document.createElement("div");
         messageElement.classList.add("message", `${sender}-message`);
+
         if (sender === 'ai') {
             const avatar = document.createElement("img");
-            avatar.src = "yoyo-avatar.png"; 
+            avatar.src = "yoyo-avatar.png";
             avatar.alt = "ai-avatar";
             avatar.className = "avatar";
             messageElement.appendChild(avatar);
         }
+
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
+
         if (messageText || sender === 'ai') {
             const p = document.createElement("p");
             p.textContent = messageText;
@@ -223,35 +238,82 @@ document.addEventListener("DOMContentLoaded", () => {
             img.src = imageBase64;
             img.alt = "uploaded-image";
             img.onclick = () => window.open(imageBase64);
-            // 如果只有圖片沒有文字，將圖片直接放在 contentDiv
-            // 如果有文字，圖片會跟在文字後面
             contentDiv.appendChild(img);
         }
-
         messageElement.appendChild(contentDiv);
         return messageElement;
     }
 
-    function addMessageToChatBox(message, sender, imageBase64 = null) {
-        const messageElement = createMessageElement(sender, message, imageBase64);
-        chatBox.appendChild(messageElement);
-        chatBox.scrollTop = chatBox.scrollHeight;
-    }
+
+    // --- 事件監聽器 ---
+
+    // 表單提交 (Enter 或點擊按鈕)
+    chatForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const message = userInput.value.trim();
+        if (message) {
+            userInput.value = "";
+            handleSendMessage(message);
+        }
+    });
+
+    // 猜謎遊戲按鈕
+    gameBtn.addEventListener('click', () => {
+        handleSendMessage("我們來玩猜謎遊戲吧！");
+    });
+
+    // 檔案上傳按鈕 (相簿 & 相機)
+    const handleFileSelection = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        if (file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const message = userInput.value.trim();
+                userInput.value = "";
+                handleSendMessage(message, e.target.result);
+            };
+            reader.readAsDataURL(file);
+        } else {
+            alert(`抱歉，祐祐目前只能看懂圖片檔案喔！`);
+        }
+        event.target.value = ''; // 清空 file input，以便下次能選同一個檔案
+    };
+    cameraBtn.addEventListener('click', () => cameraInput.click());
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', handleFileSelection);
+    cameraInput.addEventListener('change', handleFileSelection);
+
+    // 語音開關按鈕
+    toggleSpeechBtn.addEventListener('click', () => {
+        isSpeechEnabled = !isSpeechEnabled;
+        localStorage.setItem('yoyo_speech_enabled', isSpeechEnabled);
+        updateSpeechButtonUI();
+        if (!isSpeechEnabled && currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
+        }
+    });
+
+    // 語音辨識 (麥克風)
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
         const recognition = new SpeechRecognition();
         recognition.lang = 'zh-TW';
         recognition.continuous = false;
         recognition.interimResults = false;
+
         recognition.onstart = () => micBtn.classList.add("recording");
-        recognition.onresult = (event) => sendMessage(event.results[0][0].transcript);
+        recognition.onresult = (event) => handleSendMessage(event.results[0][0].transcript);
         recognition.onerror = (event) => console.error("語音辨識錯誤:", event.error);
         recognition.onend = () => micBtn.classList.remove("recording");
+
         micBtn.addEventListener("click", () => recognition.start());
     } else {
         micBtn.style.display = "none";
     }
 
-    // 為了讓速度感最大化，我將打字機效果替換為直接更新文字。
-    // 如果你仍偏好打字機效果，可以將 sendMessage 中的 while 迴圈改回原來的 typewriter 函式。
+    // --- 程式進入點 ---
+    getOrSetUserId();
+    initializeSpeechSetting();
 });
