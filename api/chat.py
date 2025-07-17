@@ -23,7 +23,14 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+frontend_url = "https://yoyo-ai-partner-frontend.onrender.com"
+
+# 從允許所有來源 '*' 改為只允許你的前端 URL
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [frontend_url]
+    }
+})
 
 profile_model = genai.GenerativeModel('gemini-2.5-flash')
 
