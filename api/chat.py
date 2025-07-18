@@ -54,6 +54,15 @@ if not gemini_api_key:
     raise ValueError("請設定 GEMINI_API_KEY 環境變數")
 genai.configure(api_key=gemini_api_key)
 
+def write_tts_cache_in_background(key: str, value: str):
+    """在背景線程中將 TTS 資料寫入 Redis，避免阻塞主回應。"""
+    try:
+        if redis_client:
+            redis_client.set(key, value, ex=2592000) # 30 天過期
+            logging.info(f"已在背景成功將 TTS 音訊存入快取。Key: {key[:50]}...")
+    except Exception as e:
+        logging.error(f"在背景寫入 TTS 快取時失敗: {e}", exc_info=True)
+
 def update_user_profile(user_id: str, conversation_history: list):
     """
     在背景執行，分析對話並更新 Redis 中的使用者 profile。
@@ -340,53 +349,46 @@ def speech():
         if not text:
             return jsonify({"error": "text 不可為空"}), 400
 
-        # 1. 清理文字，這是生成快取 Key 的基礎
         text_for_speech = cleanup_text_for_speech(text)
         
-        # 如果沒有 Redis 或清理後文字為空，則跳過快取邏輯
         if not redis_client or not text_for_speech:
             audio_base64 = text_to_speech_azure(text_for_speech)
-            if audio_base64:
-                return jsonify({"audio_base64": audio_base64})
-            else:
-                return jsonify({"error": "語音合成失敗"}), 500
+            return jsonify({"audio_base64": audio_base64}) if audio_base64 else (jsonify({"error": "語音合成失敗"}), 500)
 
-        # --- ⭐ 快取邏輯 START ⭐ ---
+        # --- ⭐ 優化後的快取邏輯 START ⭐ ---
         
-        # 2. 建立唯一的快取 Key
-        # 我們使用清理後的文字作為 Key，並加上前綴以方便管理
         cache_key = f"tts_cache:{text_for_speech}"
 
-        # 3. 查詢快取
+        # 1. 讀取快取 (這一步仍然是同步的)
         cached_audio = redis_client.get(cache_key)
 
         if cached_audio:
-            # 3a. 快取命中！
+            # 快取命中！流程不變，直接返回
             logging.info(f"TTS 快取命中！Key: {cache_key[:50]}...")
-            # Redis 儲存的是 bytes，需要解碼成 utf-8 字串
             return jsonify({"audio_base64": cached_audio.decode('utf-8')})
         else:
-            # 3b. 快取未命中
+            # 快取未命中
             logging.info(f"TTS 快取未命中，將呼叫 Azure API。Key: {cache_key[:50]}...")
             
-            # 4. 呼叫 Azure API
+            # 2. 呼叫 Azure API
             audio_base64 = text_to_speech_azure(text_for_speech)
 
             if audio_base64:
-                # 5. 如果成功生成，存入快取
-                # 設定過期時間，例如 30 天 (2592000 秒)
-                redis_client.set(cache_key, audio_base64, ex=2592000)
-                logging.info(f"已將新的 TTS 音訊存入快取。Key: {cache_key[:50]}...")
+                # 3. **非同步**寫入快取
+                # 立刻返回音訊給使用者，同時啟動一個背景線程去執行寫入操作
+                cache_thread = Thread(target=write_tts_cache_in_background, args=(cache_key, audio_base64))
+                cache_thread.start()
+                
+                # 主線程不等待寫入完成，立即返回！
                 return jsonify({"audio_base64": audio_base64})
             else:
                 return jsonify({"error": "語音合成失敗"}), 500
 
-        # --- ⭐ 快取邏輯 END ⭐ ---
+        # --- ⭐ 優化後的快取邏輯 END ⭐ ---
 
     except Exception as e:
         logging.critical(f"--- 在 /api/speech 中發生未處理的例外: {e} ---", exc_info=True)
         return Response("伺服器內部發生未知錯誤", status=500)
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8080)), debug=True)
