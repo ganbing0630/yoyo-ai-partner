@@ -333,9 +333,6 @@ def chat():
 
 @app.route('/api/speech', methods=['POST'])
 def speech():
-    """
-    此端點現在會自動處理繁轉簡。
-    """
     try:
         data = request.json
         text = data.get("text")
@@ -343,17 +340,48 @@ def speech():
         if not text:
             return jsonify({"error": "text 不可為空"}), 400
 
-        # 清理文字，移除不適合語音合成的字元
-        # 注意：我們先清理再轉換，或者先轉換再清理，影響不大。
-        # 這裡的順序是先清理再送去轉換。
+        # 1. 清理文字，這是生成快取 Key 的基礎
         text_for_speech = cleanup_text_for_speech(text)
         
-        audio_base64 = text_to_speech_azure(text_for_speech)
+        # 如果沒有 Redis 或清理後文字為空，則跳過快取邏輯
+        if not redis_client or not text_for_speech:
+            audio_base64 = text_to_speech_azure(text_for_speech)
+            if audio_base64:
+                return jsonify({"audio_base64": audio_base64})
+            else:
+                return jsonify({"error": "語音合成失敗"}), 500
 
-        if audio_base64:
-            return jsonify({"audio_base64": audio_base64})
+        # --- ⭐ 快取邏輯 START ⭐ ---
+        
+        # 2. 建立唯一的快取 Key
+        # 我們使用清理後的文字作為 Key，並加上前綴以方便管理
+        cache_key = f"tts_cache:{text_for_speech}"
+
+        # 3. 查詢快取
+        cached_audio = redis_client.get(cache_key)
+
+        if cached_audio:
+            # 3a. 快取命中！
+            logging.info(f"TTS 快取命中！Key: {cache_key[:50]}...")
+            # Redis 儲存的是 bytes，需要解碼成 utf-8 字串
+            return jsonify({"audio_base64": cached_audio.decode('utf-8')})
         else:
-            return jsonify({"error": "語音合成失敗"}), 500
+            # 3b. 快取未命中
+            logging.info(f"TTS 快取未命中，將呼叫 Azure API。Key: {cache_key[:50]}...")
+            
+            # 4. 呼叫 Azure API
+            audio_base64 = text_to_speech_azure(text_for_speech)
+
+            if audio_base64:
+                # 5. 如果成功生成，存入快取
+                # 設定過期時間，例如 30 天 (2592000 秒)
+                redis_client.set(cache_key, audio_base64, ex=2592000)
+                logging.info(f"已將新的 TTS 音訊存入快取。Key: {cache_key[:50]}...")
+                return jsonify({"audio_base64": audio_base64})
+            else:
+                return jsonify({"error": "語音合成失敗"}), 500
+
+        # --- ⭐ 快取邏輯 END ⭐ ---
 
     except Exception as e:
         logging.critical(f"--- 在 /api/speech 中發生未處理的例外: {e} ---", exc_info=True)
